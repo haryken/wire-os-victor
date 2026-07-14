@@ -44,6 +44,7 @@
 
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
 
+#include <unistd.h>
 #include <iomanip>
 #include <sstream>
 
@@ -160,6 +161,17 @@ void MicDataSystem::Init(const Anim::RobotDataLoader& dataLoader)
     
     if( _alexaState == AlexaSimpleState::Active ) {
       // Don't run "hey vector" when alexa is in the middle of an interaction, or if the mic is muted
+      return;
+    }
+
+    // Xiaozhi TTS/music on speaker easily false-triggers "hey vector" via mic bleed.
+    // Ignore voice wake while busy; backpack button FakeTrigger still works for barge-in.
+    if (access("/run/vic-cloud/xiaozhi-busy", F_OK) == 0 || access("/run/xiaozhi-busy", F_OK) == 0) {
+      static uint32_t sBusyIgnoreLog = 0;
+      if ((++sBusyIgnoreLog % 5) == 1) {
+        LOG_INFO("MicDataSystem.TriggerWord.IgnoredDuringXiaozhiTTS",
+                 "Ignoring voice wake while xiaozhi-busy (speaker bleed)");
+      }
       return;
     }
     
@@ -352,6 +364,34 @@ void MicDataSystem::RecordAudioInternal(uint32_t duration_ms, const std::string&
 
 void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
 {
+  // Xiaozhi continuous conversation: cloud arms /run/vic-cloud/xiaozhi-relisten after TTS.
+  {
+    static const char* kRelisten = "/run/vic-cloud/xiaozhi-relisten";
+    static const char* kRelistenLegacy = "/run/xiaozhi-relisten";
+    const char* relisten = nullptr;
+    if (access(kRelisten, F_OK) == 0) {
+      relisten = kRelisten;
+    } else if (access(kRelistenLegacy, F_OK) == 0) {
+      relisten = kRelistenLegacy;
+    }
+    if (relisten != nullptr) {
+      static const char* kBusy = "/run/vic-cloud/xiaozhi-busy";
+      static const char* kBusyLegacy = "/run/xiaozhi-busy";
+      if (access(kBusy, F_OK) == 0 || access(kBusyLegacy, F_OK) == 0) {
+        static uint32_t sDeferLog = 0;
+        if ((++sDeferLog % 60) == 1) {
+          LOG_INFO("MicDataSystem.Update.XiaozhiRelistenDeferred",
+                   "Deferring FakeTriggerWord while xiaozhi-busy present");
+        }
+      } else {
+        unlink(relisten);
+        LOG_INFO("MicDataSystem.Update.XiaozhiRelisten",
+                 "Triggering fake wake word for Xiaozhi continuous mode");
+        FakeTriggerWordDetection();
+      }
+    }
+  }
+
   _fftResultData->_fftResultMutex.lock();
   while (_fftResultData->_fftResultList.size() > 0)
   {
@@ -504,7 +544,12 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
           hw.mode = _currentStreamingJob->_type;
         }
         SendUdpMessage(CloudMic::Message::Createhotword(std::move(hw)));
-        LOG_INFO("MicDataSystem.Update.StreamingStart", "");
+        if (_streamingComplete) {
+          LOG_WARNING("MicDataSystem.Update.StreamingStart.Simulated",
+                      "Hotword sent but streaming is SIMULATED (no Audio) — Xiaozhi STT will fail");
+        } else {
+          LOG_INFO("MicDataSystem.Update.StreamingStart", "Real mic stream to cloud");
+        }
       }
       else
       {
@@ -963,13 +1008,10 @@ bool MicDataSystem::HasConnectionToCloud() const
 
 bool MicDataSystem::ShouldSimulateStreaming() const
 {
-  if( _batteryLow ) {
-    return true;
-  } else {
-    ShowAudioStreamStateManager* showStreamState = _context->GetShowAudioStreamStateManager();
-    const bool fakeIt = showStreamState->ShouldSimulateStreamAfterTriggerWord();
-    return fakeIt;
-  }
+  // WireOS / Xiaozhi: simulated streams send Hotword with zero Audio packets.
+  // vic-cloud then sits in listen with no mic uplink (no STT/TTS). Always stream
+  // real PCM — low-battery / offline "fake listen" UX is not usable with Xiaozhi.
+  return false;
 }
 
 void MicDataSystem::RequestConnectionStatus()

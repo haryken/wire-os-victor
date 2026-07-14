@@ -20,6 +20,8 @@
 #include "cozmoAnim/audio/microphoneAudioClient.h"
 #include "cozmoAnim/audio/engineRobotAudioInput.h"
 #include "cozmoAnim/audio/sdkAudioComponent.h"
+
+#include <unistd.h>
 #include "cozmoAnim/animation/animationStreamer.h"
 #include "cozmoAnim/animation/streamingAnimationModifier.h"
 #include "cozmoAnim/backpackLights/animBackpackLightComponent.h"
@@ -41,6 +43,8 @@
 
 #include "util/cpuProfiler/cpuProfiler.h"
 #include "util/logging/logging.h"
+
+#include <unistd.h>
 
 #define LOG_CHANNEL    "AnimEngine"
 #define NUM_ANIM_OPENCV_THREADS 0
@@ -183,6 +187,90 @@ Result AnimEngine::Update(const BaseStationTime_t currTime_nanosec)
   DEV_ASSERT(_animationStreamer, "AnimEngine.Update.InvalidAnimationStreamer");
   DEV_ASSERT(_streamingAnimationModifier, "AnimEngine.Update.InvalidStreamingAnimationModifier");
   DEV_ASSERT(_sdkAudioComponent, "AnimEngine.Update.InvalidSdkComponent");
+
+  // Xiaozhi TTS: stream (ESP32-style) or one-shot play via ExternalAudio on-robot.
+  // Flags live under /run/vic-cloud (cloud RuntimeDirectory); legacy /run copies via bridge.
+  static const char* kXiaozhiPlayFlag = "/run/vic-cloud/xiaozhi-play";
+  static const char* kXiaozhiPlayFlagLegacy = "/run/xiaozhi-play";
+  static const char* kXiaozhiStreamFlag = "/run/vic-cloud/xiaozhi-stream";
+  static const char* kXiaozhiStreamFlagLegacy = "/run/xiaozhi-stream";
+  static const char* kXiaozhiStreamEndFlag = "/run/vic-cloud/xiaozhi-stream-end";
+  static const char* kXiaozhiStreamEndFlagLegacy = "/run/xiaozhi-stream-end";
+  static const char* kXiaozhiCancelFlag = "/run/vic-cloud/xiaozhi-cancel";
+  static const char* kXiaozhiCancelFlagLegacy = "/run/xiaozhi-cancel";
+  static const char* kXiaozhiPcmPath = "/run/vic-cloud/xiaozhi_play.pcm";
+  // Resolve stream before cancel. Unlink BOTH stream paths (vic-cloud + legacy)
+  // so a leftover legacy flag cannot StartStreamPCM twice next tick.
+  const bool wantStream =
+      (access(kXiaozhiStreamFlag, F_OK) == 0 || access(kXiaozhiStreamFlagLegacy, F_OK) == 0);
+  const bool wantCancel =
+      (access(kXiaozhiCancelFlag, F_OK) == 0 || access(kXiaozhiCancelFlagLegacy, F_OK) == 0);
+  if (wantCancel && !wantStream) {
+    unlink(kXiaozhiCancelFlag);
+    unlink(kXiaozhiCancelFlagLegacy);
+    unlink(kXiaozhiPlayFlag);
+    unlink(kXiaozhiPlayFlagLegacy);
+    unlink(kXiaozhiStreamFlag);
+    unlink(kXiaozhiStreamFlagLegacy);
+    unlink(kXiaozhiStreamEndFlag);
+    unlink(kXiaozhiStreamEndFlagLegacy);
+    LOG_INFO("AnimEngine.Update.XiaozhiCancel", "Barge-in: cancelling ExternalAudio");
+    _sdkAudioComponent->CancelPlayback();
+  } else if (wantCancel && wantStream) {
+    unlink(kXiaozhiCancelFlag);
+    unlink(kXiaozhiCancelFlagLegacy);
+    LOG_INFO("AnimEngine.Update.XiaozhiCancel",
+             "Stale cancel with new stream — ignoring cancel, starting ExternalAudio");
+  }
+  bool xiaozhiStreamStartedThisTick = false;
+  if (wantStream) {
+    unlink(kXiaozhiStreamFlag);
+    unlink(kXiaozhiStreamFlagLegacy);
+    // TTS_PLAN_C: do not Abort getout here — speaker is held ~1.5s so getout can finish.
+    LOG_INFO("AnimEngine.Update.XiaozhiStream", "Stream start — ExternalAudio (getout-settle hold)");
+    _sdkAudioComponent->StartStreamPCM(kXiaozhiPcmPath, 16000, 100);
+    xiaozhiStreamStartedThisTick = true;
+  }
+  if (access(kXiaozhiStreamEndFlag, F_OK) == 0 || access(kXiaozhiStreamEndFlagLegacy, F_OK) == 0) {
+    unlink(kXiaozhiStreamEndFlag);
+    unlink(kXiaozhiStreamEndFlagLegacy);
+    if (xiaozhiStreamStartedThisTick) {
+      LOG_INFO("AnimEngine.Update.XiaozhiStreamEnd", "Ignoring stale stream-end on same tick as stream start");
+    } else {
+      LOG_INFO("AnimEngine.Update.XiaozhiStreamEnd", "Producer finished PCM");
+      _sdkAudioComponent->MarkStreamEnded();
+    }
+  }
+  const char* playFlag = nullptr;
+  if (access(kXiaozhiPlayFlag, F_OK) == 0) {
+    playFlag = kXiaozhiPlayFlag;
+  } else if (access(kXiaozhiPlayFlagLegacy, F_OK) == 0) {
+    playFlag = kXiaozhiPlayFlagLegacy;
+  }
+  if (playFlag != nullptr) {
+    unlink(playFlag);
+    LOG_INFO("AnimEngine.Update.XiaozhiPlay", "Play flag seen — loading PCM and starting ExternalAudio");
+    _sdkAudioComponent->PlayPCMFile(kXiaozhiPcmPath, 16000, 100);
+  }
+  // Feed any in-progress Xiaozhi/ExternalAudio PCM across frames.
+  if (_animationStreamer != nullptr) {
+    const std::string animName = _animationStreamer->GetStreamingAnimationName();
+    const bool getoutActive = animName.find("getout") != std::string::npos;
+    _sdkAudioComponent->SetStreamGetoutActive(getoutActive);
+  }
+  _sdkAudioComponent->Update();
+
+  // Only abort late getout AFTER speaker has posted (settle finished).
+  if (_sdkAudioComponent->IsStreamSpeakerPosted()) {
+    if (_animationStreamer != nullptr) {
+      const std::string animName = _animationStreamer->GetStreamingAnimationName();
+      if (animName.find("getout") != std::string::npos) {
+        LOG_INFO("AnimEngine.Update.XiaozhiBusy", "Aborting late getout '%s' after speaker start",
+                 animName.c_str());
+        _animationStreamer->Abort();
+      }
+    }
+  }
 
 #if ANKI_PROFILE_ANIMCOMMS_SOCKET_BUFFER_STATS
   {

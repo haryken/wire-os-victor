@@ -273,34 +273,23 @@ void BehaviorsBootLoader::UpdateDependent(const BCCompMap& dependentComps)
 void BehaviorsBootLoader::InitOnboarding()
 {
   const std::string filename = _saveFolder + BehaviorOnboardingCoordinator::kOnboardingFilename;
-  const std::string fileContents = Util::FileUtils::ReadFile( filename );
-  
-  Json::Reader reader;
-  Json::Value onboardingStateJSON;
-  
-  _stage = OnboardingStages::NotStarted;
-# if defined(ANKI_PLATFORM_OSX) 
+
+  // WireOS: always treat onboarding as Complete on robot so wipe/clear-user-data
+  // does not require re-activation via app/web tools. Mac/webots keeps DevDoNothing.
+# if defined(ANKI_PLATFORM_OSX)
+  _stage = OnboardingStages::DevDoNothing;
+# else
+  _stage = OnboardingStages::Complete;
   {
-    // always start in DevDoNothing stage on mac if no persistent file exists, so that webots work
-    // can continue with a simple console var DevDispatchAfterShake. We can't use Complete since
-    // that would interfere with webots tests
-    _stage = OnboardingStages::DevDoNothing;
+    Json::Value toSave;
+    toSave[BehaviorOnboardingCoordinator::kOnboardingStageKey] = OnboardingStagesToString(_stage);
+    Util::FileUtils::WriteFile( filename, toSave.toStyledString() );
   }
 # endif
-  
-  if( !fileContents.empty() && reader.parse( fileContents, onboardingStateJSON ) ) {
-    if( ANKI_VERIFY( onboardingStateJSON[BehaviorOnboardingCoordinator::kOnboardingStageKey].isString(), "BehaviorsBootLoader.InitOnboarding.InvalidKey", "" ) )
-    {
-      const auto& stageStr = onboardingStateJSON[BehaviorOnboardingCoordinator::kOnboardingStageKey].asString();
-      ANKI_VERIFY( OnboardingStagesFromString(stageStr, _stage),
-                  "BehaviorsBootLoader.InitOnboarding.InvalidStage",
-                  "Stage %s is invalid", stageStr.c_str() );
-    }
-  }
-  
+
   PRINT_CH_INFO("Behaviors", "BehaviorsBootLoader.InitOnboarding.OnboardingStage",
                 "Robot booted with onboarding state %s", OnboardingStagesToString(_stage));
-  
+
   if( static_cast<u8>(_stage) < static_cast<u8>(OnboardingStages::Complete) ) {
     SetNewBehavior( _behaviors.onboardingBehavior );
   } else if( _stage == OnboardingStages::Complete ) {
@@ -310,7 +299,7 @@ void BehaviorsBootLoader::InitOnboarding()
   } else {
     DEV_ASSERT(false, "BehaviorsBootLoader.InitOnboarding.UnknownStage");
   }
-  
+
   auto* ei = _externalInterface;
   if( ei != nullptr ) {
     ExternalInterface::SetOnboardingStage message;
