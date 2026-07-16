@@ -86,7 +86,7 @@ namespace {
   // The maximum amount of time that can elapse in between
   // receipt of RobotState messages before the anim process
   // considers the robot process to have disconnected
-  const float kNoRobotStateDisconnectTimeout_sec = 2.f;
+  const float kNoRobotStateDisconnectTimeout_sec = 12.f;
   float _pendingRobotDisconnectTime_sec = -1.f;
 
   // Whether or not engine has finished loading and is ready to do things
@@ -864,7 +864,9 @@ Result AnimProcessMessages::MonitorConnectionState(BaseStationTime_t currTime_na
 
   // Amount of time for which we must be disconnected from the engine in order
   // to display the NO_ENGINE_COMMS fault code.
-  static const BaseStationTime_t kDisconnectedTimeout_ns = Util::SecToNanoSec(5.f);
+  // Was 5s — too aggressive under ALSA/socket pressure (EAGAIN storms); raised to
+  // give engine time to catch up without yellow countdown → SIGILL restart.
+  static const BaseStationTime_t kDisconnectedTimeout_ns = Util::SecToNanoSec(25.f);
 
   // Check for changes in connection state to engine and send RobotAvailable
   // message when engine connects
@@ -927,19 +929,50 @@ Result AnimProcessMessages::Update(BaseStationTime_t currTime_nanosec)
     _connectionFlowInited = InitConnectionFlow(_animStreamer);
   }
 
+  // Shared offline/fault state for robot link (must clear when connected again).
+  static BaseStationTime_t robotOfflineSince_ns = 0;
+  static bool robotFaultCodeDisplayed = false;
+  static BaseStationTime_t nextRobotReconnectTry_ns = 0;
+  static const BaseStationTime_t kRobotOfflineFault_ns = Util::SecToNanoSec(20.f);
+
   if (!AnimComms::IsConnectedToRobot()) {
-    static bool faultCodeDisplayed = false;
-    if (!faultCodeDisplayed) {
-      LOG_WARNING("AnimProcessMessages.Update.NoConnectionToRobot", "");
-      FaultCode::DisplayFaultCode(FaultCode::NO_ROBOT_COMMS);
-      faultCodeDisplayed = true;
+    // Was: display fault 917 on the first tick offline. Transient radio / EAGAIN
+    // stalls then forced fault-code-handler → kill anim → full stack restart.
+    // Wait + attempt reconnect before raising NO_ROBOT_COMMS.
+    if (robotOfflineSince_ns == 0) {
+      robotOfflineSince_ns = currTime_nanosec;
+      LOG_WARNING("AnimProcessMessages.Update.NoConnectionToRobot",
+                  "Robot offline — will reconnect / fault after %.0fs",
+                  Util::NanoSecToSec(kRobotOfflineFault_ns));
     }
-  } else if ((_pendingRobotDisconnectTime_sec > 0.f) &&
-      (BaseStationTimer::getInstance()->GetCurrentTimeInSeconds() > _pendingRobotDisconnectTime_sec)) {
-    // Disconnect robot if it hasn't been heard from in a while
-    LOG_WARNING("AnimProcessMessages.Update.RobotStateTimeout", "Disconnecting robot");
-    AnimComms::DisconnectRobot();
-    _pendingRobotDisconnectTime_sec = -1.f;
+
+    if (currTime_nanosec >= nextRobotReconnectTry_ns) {
+      nextRobotReconnectTry_ns = currTime_nanosec + Util::SecToNanoSec(2.f);
+      if (AnimComms::InitRobotComms() == RESULT_OK && AnimComms::IsConnectedToRobot()) {
+        LOG_INFO("AnimProcessMessages.Update.RobotReconnected", "Robot comms restored");
+        robotOfflineSince_ns = 0;
+        robotFaultCodeDisplayed = false;
+      }
+    }
+
+    if (!robotFaultCodeDisplayed &&
+        robotOfflineSince_ns > 0 &&
+        (currTime_nanosec - robotOfflineSince_ns) > kRobotOfflineFault_ns) {
+      LOG_WARNING("AnimProcessMessages.Update.NoConnectionToRobot.Fault",
+                  "Robot still offline after %.0fs — displaying fault 917",
+                  Util::NanoSecToSec(kRobotOfflineFault_ns));
+      FaultCode::DisplayFaultCode(FaultCode::NO_ROBOT_COMMS);
+      robotFaultCodeDisplayed = true;
+    }
+  } else {
+    robotOfflineSince_ns = 0;
+    robotFaultCodeDisplayed = false;
+    if ((_pendingRobotDisconnectTime_sec > 0.f) &&
+        (BaseStationTimer::getInstance()->GetCurrentTimeInSeconds() > _pendingRobotDisconnectTime_sec)) {
+      LOG_WARNING("AnimProcessMessages.Update.RobotStateTimeout", "Disconnecting robot");
+      AnimComms::DisconnectRobot();
+      _pendingRobotDisconnectTime_sec = -1.f;
+    }
   }
 
   MonitorConnectionState(currTime_nanosec);

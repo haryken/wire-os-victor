@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include <unistd.h>
+#include <errno.h>
 
 // Socket buffer sizes
 #define UDP_CLIENT_SNDBUFSZ (256*1024)
@@ -170,6 +171,14 @@ ssize_t LocalUdpClient::Send(const char* data, size_t size)
   const ssize_t bytes_sent = send(_socket, data, size, 0);
 
   if (bytes_sent != size) {
+    // EAGAIN/EWOULDBLOCK = peer buffer full. Caller should retry next tick —
+    // do NOT drop the connection (that caused idle fault 915/917 cascades).
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+      LOG_WARNING("LocalUdpClient.Send.WouldBlock",
+                  "Send would block on %s (sock: %d) — keep connection",
+                  _sockname.c_str(), _socket);
+      return -1;
+    }
     LOG_ERROR("LocalUdpClient.Send.Fail", 
               "Send error on %s (sock: %d), disconnecting (%s)", 
               _sockname.c_str(), _socket, strerror(errno));

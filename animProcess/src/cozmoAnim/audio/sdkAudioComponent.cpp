@@ -51,6 +51,8 @@
 #define STREAM_SILENCE_PEAK_ABS (200)
 #define STREAM_GETOUT_SETTLE_SEC (1.50f)
 #define STREAM_PROTECT_HEAD_SEC (2.0f)
+// Prefer larger portal: 28000 starved after ALSA underrun (silent TTS).
+// 40000 (~2.5s) was stable for dialogue; soft-cap + PCM window still bound RAM.
 #define STREAM_MAX_PORTAL_FRAMES (40000u)
 
 namespace {
@@ -663,8 +665,17 @@ bool SdkAudioComponent::FeedStreamPcm()
     }
     // Silence prime (zeros) warms the portal but must not count toward Post —
     // otherwise we open the speaker during getout and eat the first real syllables.
+    // Exception: short replies (< ~0.55s speech) used to never Post → busy stuck + silence.
+    // When the producer already ended, post as soon as we have any real speech (or a tiny clip).
     const float speechReceived_s = _pcmSpeechFramesReceived / (float)_audioRate;
-    if (!_pcmSawSpeech || speechReceived_s <= STREAM_AUDIO_TO_BEGIN_PLAYING_SEC) {
+    const bool enoughBufferedSpeech =
+        _pcmSawSpeech && speechReceived_s > STREAM_AUDIO_TO_BEGIN_PLAYING_SEC;
+    const bool shortReplyReady =
+        _pcmStreamEnded && _pcmSawSpeech && _pcmSpeechFramesReceived > 0;
+    // Producer ended with only a blip after silence-prime — still open speaker.
+    const bool endedWithAnyPcm =
+        _pcmStreamEnded && _totalAudioFramesReceived > (_audioRate / 10); // >100ms
+    if (!enoughBufferedSpeech && !shortReplyReady && !endedWithAnyPcm) {
       return true;
     }
     if (!PostAudioEvent()) {
@@ -674,9 +685,9 @@ bool SdkAudioComponent::FeedStreamPcm()
     }
     _audioPosted = true;
     LOG_INFO("SdkAudioComponent.FeedStreamPcm",
-             "Speaker started after settle + ~%.0fms real speech (speechFrames=%u totalFrames=%u)",
+             "Speaker started after settle + ~%.0fms real speech (speechFrames=%u totalFrames=%u ended=%d)",
              STREAM_AUDIO_TO_BEGIN_PLAYING_SEC * 1000.f,
-             _pcmSpeechFramesReceived, _totalAudioFramesReceived);
+             _pcmSpeechFramesReceived, _totalAudioFramesReceived, _pcmStreamEnded ? 1 : 0);
     return true;
   };
 
