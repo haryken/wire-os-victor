@@ -166,8 +166,18 @@ private:
   void ClearActiveAudio();
   void CleanupAudioEngine();
   void ClearOperationData();
+  // After TTS/ExternalAudio ends: drop portal refs + return freed pages to the OS
+  // so vic-anim RSS can fall back toward cold-boot (glibc otherwise keeps high-water).
+  void ReleaseIdleAudioMemory();
+  void ScheduleIdleMemoryTrim();
+  void MaybeIdleMemoryTrim();
   bool SetPlayerVolume(float volume) const;
   bool SendAnimToEngine(SDKAudioStreamingState audioState, uint32_t audioSent=0, uint32_t audioPlayed=0);
+
+  // Deferred malloc_trim after Wwise/plugin teardown finishes asynchronously.
+  bool _idleTrimPending = false;
+  std::chrono::steady_clock::time_point _idleTrimAt{};
+  uint8_t _idleTrimPass = 0;
 };
 
 }   // end namespace Anki

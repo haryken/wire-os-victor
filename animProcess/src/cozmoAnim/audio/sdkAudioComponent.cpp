@@ -35,6 +35,10 @@
 #include <unistd.h>
 #include <vector>
 
+#if defined(__linux__) || defined(ANKI_PLATFORM_VICOS) || defined(ANKI_PLATFORM_LINUX)
+#include <malloc.h>
+#endif
+
 // Opus decode-in-anim was experimental; current Xiaozhi cloud decodes to PCM.
 // Do not pull libopus into victor_anim link — keep stubs only.
 #define ANKI_HAS_OPUS 0
@@ -54,6 +58,9 @@
 // Prefer larger portal: 28000 starved after ALSA underrun (silent TTS).
 // 40000 (~2.5s) was stable for dialogue; soft-cap + PCM window still bound RAM.
 #define STREAM_MAX_PORTAL_FRAMES (40000u)
+// After ExternalAudio completes, trim heap again once Wwise finishes teardown.
+#define IDLE_MEMORY_TRIM_DELAY_SEC (1.5f)
+#define IDLE_MEMORY_TRIM_SECOND_DELAY_SEC (4.0f)
 
 namespace {
   constexpr Anki::AudioMetaData::GameObjectType kSdkGameObject = Anki::AudioMetaData::GameObjectType::TextToSpeech;
@@ -325,6 +332,12 @@ void SdkAudioComponent::CleanupAudioEngine()
   StopActiveAudio();
   ClearActiveAudio();
   ClearOperationData();
+  // Return pages now; deferred trim is scheduled by callers that fully end playback
+  // (OnAudioCompleted / CancelPlayback). Mid-stream replace via StartStreamPCM should
+  // not arm idle trim — next Prepare is immediate.
+#if defined(__linux__) || defined(ANKI_PLATFORM_VICOS) || defined(ANKI_PLATFORM_LINUX)
+  malloc_trim(0);
+#endif
   // Do NOT clear xiaozhi-busy here — StartStreamPCM calls Cleanup when replacing
   // a prior stream and would drop the busy gate while cloud still expects playback.
   // Busy is cleared only in OnAudioCompleted / CancelPlayback.
@@ -343,15 +356,17 @@ void SdkAudioComponent::ClearOperationData()
 
   _audioPrepared = false;
   _audioPosted = false;
-  _waveData = NULL;
+  _waveData = nullptr;
   _pcmFilePlayActive = false;
-  _pendingPcm.clear();
+  // clear() keeps capacity — swap so large oneshot PCM buffers return to the allocator.
+  std::vector<uint8_t>().swap(_pendingPcm);
   _pendingPcmOffset = 0;
   _pcmStreamActive = false;
   _pcmStreamEnded = false;
   _pcmStreamDoneProducing = false;
   _pcmStreamIsOpus = false;
-  _pcmStreamPath.clear();
+  _pcmStreamIsFifo = false;
+  std::string().swap(_pcmStreamPath);
   _pcmStreamOffset = 0;
   if (_pcmStreamFd >= 0) {
     close(_pcmStreamFd);
@@ -363,8 +378,8 @@ void SdkAudioComponent::ClearOperationData()
 #endif
     _opusDecoder = nullptr;
   }
-  _opusHdrBuf.clear();
-  _opusBodyBuf.clear();
+  std::vector<uint8_t>().swap(_opusHdrBuf);
+  std::vector<uint8_t>().swap(_opusBodyBuf);
   _opusNeed = 0;
   _opusHaveLen = false;
   _streamHoldForGetout = false;
@@ -375,6 +390,58 @@ void SdkAudioComponent::ClearOperationData()
   _pcmSpeechFramesReceived = 0;
   // Do NOT unlink the Opus FIFO here — cloud may still be writing. Unlink only after
   // OnAudioCompleted / CancelPlayback once both ends are done.
+}
+
+void SdkAudioComponent::ReleaseIdleAudioMemory()
+{
+  // Drop any leftover portal shared_ptr (Complete path used to skip ClearActiveAudio).
+  ClearActiveAudio();
+#if defined(__linux__) || defined(ANKI_PLATFORM_VICOS) || defined(ANKI_PLATFORM_LINUX)
+  // ExternalAudio / float portal chunks free into glibc but RSS stays at high-water
+  // until trim — that sticky RSS is what LMK sees after Xiaozhi goes idle.
+  malloc_trim(0);
+#endif
+  ScheduleIdleMemoryTrim();
+}
+
+void SdkAudioComponent::ScheduleIdleMemoryTrim()
+{
+  _idleTrimPending = true;
+  _idleTrimPass = 0;
+  _idleTrimAt = std::chrono::steady_clock::now() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<float>(IDLE_MEMORY_TRIM_DELAY_SEC));
+}
+
+void SdkAudioComponent::MaybeIdleMemoryTrim()
+{
+  if (!_idleTrimPending) {
+    return;
+  }
+  // Do not trim while a new stream is already armed — would race Prepare.
+  if (_audioPrepared || _pcmFilePlayActive || _pcmStreamActive) {
+    _idleTrimPending = false;
+    return;
+  }
+  if (std::chrono::steady_clock::now() < _idleTrimAt) {
+    return;
+  }
+#if defined(__linux__) || defined(ANKI_PLATFORM_VICOS) || defined(ANKI_PLATFORM_LINUX)
+  ClearActiveAudio();
+  malloc_trim(0);
+#endif
+  ++_idleTrimPass;
+  if (_idleTrimPass < 2) {
+    _idleTrimAt = std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<float>(IDLE_MEMORY_TRIM_SECOND_DELAY_SEC));
+    LOG_INFO("SdkAudioComponent.MaybeIdleMemoryTrim",
+             "Deferred heap trim pass %u (Xiaozhi idle)", _idleTrimPass);
+  } else {
+    _idleTrimPending = false;
+    LOG_INFO("SdkAudioComponent.MaybeIdleMemoryTrim",
+             "Deferred heap trim done (Xiaozhi idle)");
+  }
 } 
 
 //
@@ -415,7 +482,11 @@ void SdkAudioComponent::OnAudioCompleted()
   }
   ++_playbackEpoch;
   LOG_DEBUG("SdkAudioComponent.OnAudioCompleted", "AudioStreaming completion callback received");
-  ClearOperationData(); // Cleanup operation's memory
+  // Full teardown (portal + vectors), then return pages to OS — peak during play is OK,
+  // sticky RSS after idle was the LMK/fault-800 trigger.
+  ClearActiveAudio();
+  ClearOperationData();
+  ReleaseIdleAudioMemory();
   SendAnimToEngine(SDKAudioStreamingState::Completed, 0, 0);
 
   Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-busy");
@@ -513,6 +584,8 @@ void SdkAudioComponent::Update()
     FeedStreamPcm();
   } else if (_pcmFilePlayActive) {
     FeedPendingPcmChunks();
+  } else {
+    MaybeIdleMemoryTrim();
   }
 }
 
@@ -526,6 +599,7 @@ void SdkAudioComponent::CancelPlayback()
   }
   LOG_INFO("SdkAudioComponent.CancelPlayback", "Stopping ExternalAudio (Xiaozhi barge-in)");
   CleanupAudioEngine();
+  ReleaseIdleAudioMemory();
   Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-busy");
   Util::FileUtils::DeleteFile("/run/xiaozhi-busy");
   Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-relisten-pending");
