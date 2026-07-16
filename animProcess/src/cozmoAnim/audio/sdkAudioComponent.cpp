@@ -488,77 +488,32 @@ void SdkAudioComponent::OnAudioCompleted()
   ClearOperationData();
   ReleaseIdleAudioMemory();
   SendAnimToEngine(SDKAudioStreamingState::Completed, 0, 0);
-
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-busy");
-  Util::FileUtils::DeleteFile("/run/xiaozhi-busy");
-  // Do NOT delete xiaozhi_play.pcm here — cloud may still be appending / next turn
-  // may already own the file (stale Complete after barge-in caused silent TTS).
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi_play.opus");
-
-  // Xiaozhi continuous: if a pending relisten was requested, arm FakeTriggerWord via flag.
-  static const char* kPending = "/run/vic-cloud/xiaozhi-relisten-pending";
-  static const char* kPendingLegacy = "/run/xiaozhi-relisten-pending";
-  static const char* kRelisten = "/run/vic-cloud/xiaozhi-relisten";
-  static const char* kRelistenLegacy = "/run/xiaozhi-relisten";
-  const char* pending = nullptr;
-  if (access(kPending, F_OK) == 0) {
-    pending = kPending;
-  } else if (access(kPendingLegacy, F_OK) == 0) {
-    pending = kPendingLegacy;
-  }
-  if (pending != nullptr) {
-    unlink(pending);
-    // Prefer /run/vic-cloud; also write legacy path for older micDataSystem builds.
-    Util::FileUtils::WriteFile(kRelisten, "1");
-    Util::FileUtils::WriteFile(kRelistenLegacy, "1");
-    LOG_INFO("SdkAudioComponent.OnAudioCompleted.XiaozhiRelisten", "Armed continuous relisten after TTS");
-  }
+  // Plan B: cloud owns xiaozhi-busy / relisten — do not touch those flags here
+  // (SDK ExternalAudio Complete must not clear cloud TTS busy).
 }
 
 bool SdkAudioComponent::PlayPCMFile(const std::string& path, uint16_t sampleRate, uint16_t volumePercent)
 {
-  if (sampleRate < 8000 || sampleRate > 16025) {
-    LOG_ERROR("SdkAudioComponent.PlayPCMFile", "Invalid sample rate %u", sampleRate);
-    return false;
-  }
+  // Plan B: Xiaozhi TTS is ALSA in vic-cloud. Keep API for potential rollback builds
+  // but refuse to open Wwise portals from on-robot Xiaozhi flags.
+  LOG_INFO("SdkAudioComponent.PlayPCMFile", "Disabled (Plan B ALSA) — ignoring %s", path.c_str());
+  return false;
+}
 
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    LOG_ERROR("SdkAudioComponent.PlayPCMFile", "Unable to open %s", path.c_str());
-    return false;
-  }
-  std::vector<uint8_t> pcm((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  if (pcm.empty() || (pcm.size() % 2) != 0) {
-    LOG_ERROR("SdkAudioComponent.PlayPCMFile", "Invalid PCM size %zu", pcm.size());
-    return false;
-  }
-
-  // Cancel any in-flight file play so we don't stack streams.
-  if (_audioPrepared || _pcmFilePlayActive) {
-    CleanupAudioEngine();
-  }
-
-  RobotInterface::ExternalAudioPrepare prep;
-  prep.audio_volume = volumePercent;
-  prep.audio_rate = sampleRate;
-  if (!PrepareAudioEngine(prep)) {
-    return false;
-  }
-
-  _pendingPcm = std::move(pcm);
-  _pendingPcmOffset = 0;
-  _pcmFilePlayActive = true;
-
-  LOG_INFO("SdkAudioComponent.PlayPCMFile", "Queued %zu bytes @ %u Hz from %s",
-           _pendingPcm.size(), sampleRate, path.c_str());
-
-  // Feed as much as fits this frame; remainder continues in Update().
-  FeedPendingPcmChunks();
-  return true;
+bool SdkAudioComponent::StartStreamPCM(const std::string& path, uint16_t sampleRate, uint16_t volumePercent)
+{
+  LOG_INFO("SdkAudioComponent.StartStreamPCM", "Disabled (Plan B ALSA) — ignoring %s", path.c_str());
+  (void)sampleRate;
+  (void)volumePercent;
+  return false;
 }
 
 void SdkAudioComponent::Update()
 {
+  // Fast path: no SDK/Xiaozhi ExternalAudio in flight (Plan B Xiaozhi never arms these).
+  if (!_pcmStreamActive && !_pcmFilePlayActive && !_audioPrepared && !_idleTrimPending) {
+    return;
+  }
   if (_pcmStreamActive) {
     // TTS_PLAN_B_MUTE_SFX_2026-07-13: mute Animation/Behavior SFX for the whole
     // hold + ~2s after Post so ListeningGetOut audio cannot duck TTS head.
@@ -592,22 +547,11 @@ void SdkAudioComponent::Update()
 void SdkAudioComponent::CancelPlayback()
 {
   if (!_audioPrepared && !_pcmFilePlayActive && !_pcmStreamActive) {
-    // Still clear busy marker if present.
-    Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-busy");
-    Util::FileUtils::DeleteFile("/run/xiaozhi-busy");
     return;
   }
-  LOG_INFO("SdkAudioComponent.CancelPlayback", "Stopping ExternalAudio (Xiaozhi barge-in)");
+  LOG_INFO("SdkAudioComponent.CancelPlayback", "Stopping ExternalAudio");
   CleanupAudioEngine();
   ReleaseIdleAudioMemory();
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-busy");
-  Util::FileUtils::DeleteFile("/run/xiaozhi-busy");
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-relisten-pending");
-  Util::FileUtils::DeleteFile("/run/xiaozhi-relisten-pending");
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-stream");
-  Util::FileUtils::DeleteFile("/run/xiaozhi-stream");
-  Util::FileUtils::DeleteFile("/run/vic-cloud/xiaozhi-stream-end");
-  Util::FileUtils::DeleteFile("/run/xiaozhi-stream-end");
 }
 
 bool SdkAudioComponent::StartStreamOpus(const std::string& path, uint16_t pcmSampleRate, uint16_t volumePercent)
@@ -617,69 +561,6 @@ bool SdkAudioComponent::StartStreamOpus(const std::string& path, uint16_t pcmSam
   (void)pcmSampleRate;
   (void)volumePercent;
   return false;
-}
-
-bool SdkAudioComponent::StartStreamPCM(const std::string& path, uint16_t sampleRate, uint16_t volumePercent)
-{
-  if (sampleRate < 8000 || sampleRate > 16025) {
-    LOG_ERROR("SdkAudioComponent.StartStreamPCM", "Invalid sample rate %u", sampleRate);
-    return false;
-  }
-
-  if (_audioPrepared || _pcmFilePlayActive || _pcmStreamActive) {
-    CleanupAudioEngine();
-  }
-
-  // TTS_HEAD_FIX_2026-07-13 (anim): wakeword getout / anim SFX share the speaker with
-  // ExternalAudio and duck/eat the first Xiaozhi TTS chunk. Stop competing voices first.
-  {
-    using GO = Anki::AudioMetaData::GameObjectType;
-    _audioController->StopAllAudioEvents(static_cast<AudioEngine::AudioGameObject>(GO::Animation));
-    _audioController->StopAllAudioEvents(static_cast<AudioEngine::AudioGameObject>(GO::TextToSpeech));
-    _audioController->StopAllAudioEvents(static_cast<AudioEngine::AudioGameObject>(GO::Behavior));
-    LOG_INFO("SdkAudioComponent.StartStreamPCM", "Stopped Animation/TTS/Behavior audio before Xiaozhi stream");
-  }
-
-  RobotInterface::ExternalAudioPrepare prep;
-  prep.audio_volume = volumePercent;
-  prep.audio_rate = sampleRate;
-  if (!PrepareAudioEngine(prep)) {
-    return false;
-  }
-
-  _pcmStreamPath = path;
-  _pcmStreamOffset = 0;
-  _pcmStreamEnded = false;
-  _pcmStreamDoneProducing = false;
-  _pcmStreamActive = true;
-  _pcmFilePlayActive = false;
-  _pcmSawSpeech = false;
-  _pcmSpeechFramesReceived = 0;
-  _streamHoldForGetout = true;
-  _streamHoldStart = std::chrono::steady_clock::now();
-  _streamSawGetout = false;
-  _streamGetoutActive = false;
-  _streamSilencedAnim = false;
-  _pendingPcm.clear();
-  _pendingPcmOffset = 0;
-  if (_pcmStreamFd >= 0) {
-    close(_pcmStreamFd);
-    _pcmStreamFd = -1;
-  }
-
-  struct stat st;
-  _pcmStreamIsFifo = (stat(path.c_str(), &st) == 0) && S_ISFIFO(st.st_mode);
-  // Open read end ASAP so cloud's O_WRONLY open can succeed (FIFO backpressure path).
-  _pcmStreamFd = open(path.c_str(), O_RDONLY | O_NONBLOCK);
-  if (_pcmStreamFd < 0) {
-    LOG_ERROR("SdkAudioComponent.StartStreamPCM", "Unable to open %s errno=%d", path.c_str(), errno);
-    CleanupAudioEngine();
-    return false;
-  }
-
-  LOG_INFO("SdkAudioComponent.StartStreamPCM", "Streaming from %s @ %u Hz (fifo=%d)",
-           path.c_str(), sampleRate, _pcmStreamIsFifo ? 1 : 0);
-  return true;
 }
 
 void SdkAudioComponent::MarkStreamEnded()
