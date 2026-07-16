@@ -188,8 +188,12 @@ Result AnimEngine::Update(const BaseStationTime_t currTime_nanosec)
   DEV_ASSERT(_streamingAnimationModifier, "AnimEngine.Update.InvalidStreamingAnimationModifier");
   DEV_ASSERT(_sdkAudioComponent, "AnimEngine.Update.InvalidSdkComponent");
 
-  // Xiaozhi TTS: stream (ESP32-style) or one-shot play via ExternalAudio on-robot.
-  // Flags live under /run/vic-cloud (cloud RuntimeDirectory); legacy /run copies via bridge.
+  // Plan B (2026-07): Xiaozhi TTS plays via ALSA MultiMedia2 from vic-cloud.
+  // Do NOT StartStreamPCM / PlayPCMFile here — ExternalAudio/Wwise ballooned
+  // vic-anim RSS (100–200MB). Mic still honors xiaozhi-busy / xiaozhi-relisten
+  // in MicDataSystem. Set true only to restore the old ExternalAudio path.
+  static constexpr bool kXiaozhiExternalAudio = false;
+
   static const char* kXiaozhiPlayFlag = "/run/vic-cloud/xiaozhi-play";
   static const char* kXiaozhiPlayFlagLegacy = "/run/xiaozhi-play";
   static const char* kXiaozhiStreamFlag = "/run/vic-cloud/xiaozhi-stream";
@@ -199,6 +203,33 @@ Result AnimEngine::Update(const BaseStationTime_t currTime_nanosec)
   static const char* kXiaozhiCancelFlag = "/run/vic-cloud/xiaozhi-cancel";
   static const char* kXiaozhiCancelFlagLegacy = "/run/xiaozhi-cancel";
   static const char* kXiaozhiPcmPath = "/run/vic-cloud/xiaozhi_play.pcm";
+
+  if (!kXiaozhiExternalAudio) {
+    // Consume leftover ExternalAudio flags so a mixed/old cloud build cannot
+    // re-enter Wwise and bloat RSS again.
+    const bool hadXiaozhiAudioFlag =
+        (access(kXiaozhiStreamFlag, F_OK) == 0 || access(kXiaozhiStreamFlagLegacy, F_OK) == 0 ||
+         access(kXiaozhiPlayFlag, F_OK) == 0 || access(kXiaozhiPlayFlagLegacy, F_OK) == 0 ||
+         access(kXiaozhiStreamEndFlag, F_OK) == 0 || access(kXiaozhiStreamEndFlagLegacy, F_OK) == 0 ||
+         access(kXiaozhiCancelFlag, F_OK) == 0 || access(kXiaozhiCancelFlagLegacy, F_OK) == 0);
+    if (hadXiaozhiAudioFlag) {
+      unlink(kXiaozhiStreamFlag);
+      unlink(kXiaozhiStreamFlagLegacy);
+      unlink(kXiaozhiPlayFlag);
+      unlink(kXiaozhiPlayFlagLegacy);
+      unlink(kXiaozhiStreamEndFlag);
+      unlink(kXiaozhiStreamEndFlagLegacy);
+      unlink(kXiaozhiCancelFlag);
+      unlink(kXiaozhiCancelFlagLegacy);
+      static uint32_t sIgnoreLog = 0;
+      if ((++sIgnoreLog % 30) == 1) {
+        LOG_INFO("AnimEngine.Update.XiaozhiExternalAudioDisabled",
+                 "Ignoring xiaozhi ExternalAudio flags (Plan B ALSA in vic-cloud)");
+      }
+    }
+  } else {
+  // Xiaozhi TTS: stream (ESP32-style) or one-shot play via ExternalAudio on-robot.
+  // Flags live under /run/vic-cloud (cloud RuntimeDirectory); legacy /run copies via bridge.
   // Resolve stream before cancel. Unlink BOTH stream paths (vic-cloud + legacy)
   // so a leftover legacy flag cannot StartStreamPCM twice next tick.
   const bool wantStream =
@@ -258,10 +289,12 @@ Result AnimEngine::Update(const BaseStationTime_t currTime_nanosec)
     const bool getoutActive = animName.find("getout") != std::string::npos;
     _sdkAudioComponent->SetStreamGetoutActive(getoutActive);
   }
+  } // kXiaozhiExternalAudio
+
   _sdkAudioComponent->Update();
 
   // Only abort late getout AFTER speaker has posted (settle finished).
-  if (_sdkAudioComponent->IsStreamSpeakerPosted()) {
+  if (kXiaozhiExternalAudio && _sdkAudioComponent->IsStreamSpeakerPosted()) {
     if (_animationStreamer != nullptr) {
       const std::string animName = _animationStreamer->GetStreamingAnimationName();
       if (animName.find("getout") != std::string::npos) {
