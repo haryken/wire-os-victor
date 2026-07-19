@@ -45,6 +45,7 @@
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
 
 #include <unistd.h>
+#include <cstdio>
 #include <iomanip>
 #include <sstream>
 
@@ -514,6 +515,19 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
   {
     std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
 
+    // WireOS: orphan MicDataInfo jobs (stream already closed, pointer cleared) still Collect.
+    if (!_currentlyStreaming && _currentStreamingJob == nullptr && !_micProcessingJobs.empty())
+    {
+      LOG_WARNING("MicDataSystem.Update.OrphanMicJobs",
+                  "Force-ending %zu leftover mic job(s)", _micProcessingJobs.size());
+      for (auto& job : _micProcessingJobs) {
+        if (job != nullptr) {
+          job->ForceEndCollection();
+        }
+      }
+      _micProcessingJobs.clear();
+    }
+
     //  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
     // ... this block is where we kick off a new stream to the cloud ...
 
@@ -532,6 +546,7 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
         _currentlyStreaming = true;
         _streamingComplete = ShouldSimulateStreaming();
         _streamingAudioIndex = 0;
+        _streamingChunksSent = 0;
 
         // even though this isn't necessarily the exact frame the backpack lights begin (since that's done in a different
         // thread), it doesn't make a noticeable difference since this is an arbitrary number and doesn't need to be precise
@@ -569,7 +584,7 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
       if (!_streamingComplete)
       {
         static constexpr size_t kMaxRecordNumChunks = (kStreamingTimeout_ms / kTimePerChunk_ms) + 1;
-        const bool didTimeout = _streamingAudioIndex >= kMaxRecordNumChunks;
+        const bool didTimeout = _streamingChunksSent >= kMaxRecordNumChunks;
         if (receivedStopMessage || didTimeout)
         {
           _streamingComplete = true;
@@ -579,7 +594,7 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
           {
             SendUdpMessage(CloudMic::Message::CreateaudioDone({}));
           }
-          LOG_INFO("MicDataSystem.Update.StreamingEnd", "%zu ms", _streamingAudioIndex * kTimePerChunk_ms);
+          LOG_INFO("MicDataSystem.Update.StreamingEnd", "%zu ms", _streamingChunksSent * kTimePerChunk_ms);
           #if ANKI_DEV_CHEATS
             _fakeStreamingState = false;
           #endif
@@ -590,9 +605,11 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
           if (!_fakeStreamingState)
         #endif
           {
-            // Copy any new data that has been pushed onto the currently streaming job
+            // A1: GetProcessedAudio frees consumed chunks — buffer index stays 0.
+            // Timeout uses _streamingChunksSent (must NOT reset), else stream never ends → NoCloud.
             AudioUtil::AudioChunkList newAudio = _currentStreamingJob->GetProcessedAudio(_streamingAudioIndex);
-            _streamingAudioIndex += newAudio.size();
+            _streamingAudioIndex = 0;
+            _streamingChunksSent += newAudio.size();
 
             // Send the audio to any clients we've got
             if (_udpServer->HasClient())
@@ -693,6 +710,68 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
     FaceInfoScreenManager::getInstance()->EnableAlexaScreen(ScreenName::None,"","");
   }
 
+  // WireOS TEMP: every ~10s log mic job buffers — if idle RSS climbs, this shows leftover Collect*.
+  {
+    constexpr BaseStationTime_t kMicJobProbeInterval_ns = 10ULL * 1000ULL * 1000ULL * 1000ULL;
+    if (_lastMicJobProbe_ns == 0 || currTime_nanosec >= _lastMicJobProbe_ns + kMicJobProbeInterval_ns) {
+      _lastMicJobProbe_ns = currTime_nanosec;
+      std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
+      size_t totalProcChunks = 0;
+      size_t totalRawChunks = 0;
+      size_t jobIdx = 0;
+      for (const auto& job : _micProcessingJobs) {
+        if (job == nullptr) {
+          continue;
+        }
+        size_t procChunks = 0;
+        size_t rawChunks = 0;
+        uint32_t recorded = 0;
+        uint32_t toRecord = 0;
+        bool collectProc = false;
+        bool collectRaw = false;
+        job->GetDebugStats(procChunks, rawChunks, recorded, toRecord, collectProc, collectRaw);
+        totalProcChunks += procChunks;
+        totalRawChunks += rawChunks;
+        // ~320 B/chunk processed mono; ~1280 B/chunk raw 4ch
+        const size_t procApproxKB = (procChunks * kSamplesPerBlockPerChannel * sizeof(AudioUtil::AudioSample)) / 1024;
+        const size_t rawApproxKB = (rawChunks * kIncomingAudioChunkSize * sizeof(AudioUtil::AudioSample)) / 1024;
+        LOG_INFO("MicJobProbe",
+                 "job[%zu] type=%d procChunks=%zu(~%zuKB) rawChunks=%zu(~%zuKB) rec=%ums toRec=%ums collect={proc=%d raw=%d} streamingJob=%d",
+                 jobIdx,
+                 static_cast<int>(job->_type),
+                 procChunks, procApproxKB,
+                 rawChunks, rawApproxKB,
+                 recorded, toRecord,
+                 collectProc ? 1 : 0, collectRaw ? 1 : 0,
+                 (job == _currentStreamingJob) ? 1 : 0);
+        ++jobIdx;
+      }
+      const size_t totalProcKB = (totalProcChunks * kSamplesPerBlockPerChannel * sizeof(AudioUtil::AudioSample)) / 1024;
+      const size_t totalRawKB = (totalRawChunks * kIncomingAudioChunkSize * sizeof(AudioUtil::AudioSample)) / 1024;
+      LOG_INFO("MicJobProbe",
+               "summary nJobs=%zu currentlyStreaming=%d streamingComplete=%d chunksSent=%zu totalProc=~%zuKB totalRaw=~%zuKB",
+               _micProcessingJobs.size(),
+               _currentlyStreaming ? 1 : 0,
+               _streamingComplete ? 1 : 0,
+               _streamingChunksSent,
+               totalProcKB, totalRawKB);
+      // Also drop a one-liner for MemProbe (anim LOG_* often not in journalctl).
+      {
+        FILE* f = fopen("/run/vic-anim-micjob.txt", "w");
+        if (f != nullptr) {
+          fprintf(f,
+                  "nJobs=%zu stream=%d done=%d sent=%zu procKB=%zu rawKB=%zu\n",
+                  _micProcessingJobs.size(),
+                  _currentlyStreaming ? 1 : 0,
+                  _streamingComplete ? 1 : 0,
+                  _streamingChunksSent,
+                  totalProcKB, totalRawKB);
+          fclose(f);
+        }
+      }
+    }
+  }
+
   // Try to retrieve the speaker latency from the AkAlsaSink plugin. We
   // only need to actually call into the plugin once (or until we get a
   // nonzero latency), since the latency does not change during runtime.
@@ -732,11 +811,21 @@ void MicDataSystem::ClearCurrentStreamingJob()
   {
     std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
     _currentlyStreaming = false;
-    if (_currentStreamingJob != nullptr)
-    {
-      _currentStreamingJob->SetTimeToRecord(0);
-      _currentStreamingJob = nullptr;
+    _streamingComplete = false;
+    const bool hadStreamingJob = (_currentStreamingJob != nullptr) || !_micProcessingJobs.empty();
 
+    // WireOS: FakeTrigger / overlapping listens can leave extra MicDataInfo jobs in the
+    // deque. Ending only _currentStreamingJob left zombies Collect'ing (~32KB/s each).
+    for (auto& job : _micProcessingJobs) {
+      if (job != nullptr) {
+        job->ForceEndCollection();
+      }
+    }
+    _micProcessingJobs.clear();
+    _currentStreamingJob = nullptr;
+
+    if (hadStreamingJob)
+    {
       for(auto func : _streamUpdatedCallbacks)
       {
         if(func != nullptr)
@@ -779,6 +868,17 @@ bool MicDataSystem::HasStreamingJob() const
 void MicDataSystem::AddMicDataJob(std::shared_ptr<MicDataInfo> newJob, bool isStreamingJob)
 {
   std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
+  if (isStreamingJob)
+  {
+    // Drop any leftover collect jobs before a new listen (overlapping FakeTrigger).
+    for (auto& job : _micProcessingJobs) {
+      if (job != nullptr) {
+        job->ForceEndCollection();
+      }
+    }
+    _micProcessingJobs.clear();
+    _currentStreamingJob = nullptr;
+  }
   _micProcessingJobs.push_back(std::shared_ptr<MicDataInfo>(newJob));
   if (isStreamingJob)
   {

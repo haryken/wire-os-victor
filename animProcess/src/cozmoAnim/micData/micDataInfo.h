@@ -62,8 +62,18 @@ public:
   AudioUtil::AudioChunkList GetProcessedAudio(size_t beginIndex);
   void UpdateForNextChunk();
   bool CheckDone() const;
+  // Stop collecting immediately and free buffers (stream end / zombie job).
+  void ForceEndCollection();
   uint32_t GetTimeToRecord_ms() const;
   uint32_t GetTimeRecorded_ms() const;
+
+  // WireOS TEMP: RSS leak probe — processed/raw chunk counts + collect flags.
+  void GetDebugStats(size_t& outProcessedChunks,
+                     size_t& outRawChunks,
+                     uint32_t& outRecorded_ms,
+                     uint32_t& outToRecord_ms,
+                     bool& outCollectProcessed,
+                     bool& outCollectRaw) const;
 
   void EnableDataCollect(MicDataType type, bool saveToFile);
   void DisableDataCollect(MicDataType type);

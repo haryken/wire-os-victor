@@ -50,7 +50,6 @@ namespace {
 #define LOG_CHANNEL "Microphones"
 #define CONSOLE_GROUP "MicData"
 
-  CONSOLE_VAR(bool, kMicData_CollectRawTriggers, CONSOLE_GROUP, false);
   CONSOLE_VAR(bool, kMicData_SpeakerNoiseDisablesMics, CONSOLE_GROUP, false);
 
   // Time necessary for the VAD logic to wait when there's no activity, before we begin skipping processing for
@@ -58,9 +57,7 @@ namespace {
   CONSOLE_VAR_RANGED(uint32_t, kMicData_QuietTimeCooldown_ms, CONSOLE_GROUP, 1000, 500, 10000);
 
 #if ANKI_DEV_CHEATS
-
-  CONSOLE_VAR(bool, kMicData_SaveRawFullIntent, CONSOLE_GROUP, false);
-  CONSOLE_VAR(bool, kMicData_SaveRawFullIntent_WakeWordless, CONSOLE_GROUP, false);
+  // SaveRawFullIntent / CollectRawTriggers removed — WireOS never writes micdata WAVs.
   
   CONSOLE_VAR(bool, kMicData_ForceEnableMicDataProc, CONSOLE_GROUP, false);
   CONSOLE_VAR(bool, kMicData_ForceDisableMicDataProc, CONSOLE_GROUP, false);
@@ -259,27 +256,10 @@ RobotTimeStamp_t MicDataProcessor::CreateStreamJob(CloudMic::StreamType streamTy
   newJob->_writeNameBase = ""; //use autogen names
   newJob->_numMaxFiles = 100;
   newJob->_type = streamType;
-  bool saveToFile = false;
-#if ANKI_DEV_CHEATS
-  saveToFile = true;
-  // Simplify stream type
-  bool saveRawFullStream = false;
-  switch (streamType) {
-    case CloudMic::StreamType::Normal:
-      saveRawFullStream = kMicData_SaveRawFullIntent;
-      break;
-    case CloudMic::StreamType::Blackjack:
-    case CloudMic::StreamType::KnowledgeGraph:
-      saveRawFullStream = kMicData_SaveRawFullIntent_WakeWordless;
-      break;
-  }
-
-  if (saveRawFullStream) {
-    newJob->EnableDataCollect(MicDataType::Raw, true);
-  }
-  newJob->_audioSaveCallback = std::bind(&MicDataSystem::AudioSaveCallback, _micDataSystem, std::placeholders::_1);
-#endif
-  newJob->EnableDataCollect(MicDataType::Processed, saveToFile);
+  // WireOS / Xiaozhi: never persist mic captures to disk, even if ANKI_DEV_CHEATS=1.
+  // Continuous FakeTrigger + WAV encode/save was ballooning vic-anim RSS (triggeredCapture /
+  // triggersOnly under /data/.../cache/micdata). Still collect Processed in RAM for cloud uplink.
+  newJob->EnableDataCollect(MicDataType::Processed, /*saveToFile=*/false);
   newJob->SetTimeToRecord(MicDataInfo::kMaxRecordTime_ms);
   newJob->SetAudioFadeInTime(MicDataInfo::kDefaultAudioFadeIn_ms);
   
@@ -328,44 +308,8 @@ RobotTimeStamp_t MicDataProcessor::CreateTriggerWordDetectedJobs(bool shouldStre
     LOG_INFO("MicDataProcessor.CreateTriggerWordDetectedJobs.NoStreaming", "Not adding streaming jobs because disabled");
   }
 
-  // Now we set up the optional job for recording _just_ the trigger that was just recognized
-  bool saveTriggerOnly = false;
-# if ANKI_DEV_CHEATS
-  saveTriggerOnly = true;
-# endif // ANKI_DEV_CHEATS
-  
-  if (saveTriggerOnly)
-  {
-    std::lock_guard<std::mutex> lock(_procAudioXferMutex);
-    
-    auto triggerJob = std::make_shared<MicDataInfo>();
-    triggerJob->_writeLocationDir = Util::FileUtils::FullFilePath({_writeLocationDir, "triggersOnly"});
-    triggerJob->_writeNameBase = ""; // Use the autogen names in this subfolder
-    triggerJob->_numMaxFiles = 100;
-    triggerJob->EnableDataCollect(MicDataType::Processed, saveTriggerOnly);
-    if (kMicData_CollectRawTriggers)
-    {
-      triggerJob->EnableDataCollect(MicDataType::Raw, saveTriggerOnly);
-    }
-    triggerJob->_audioSaveCallback = std::bind(&MicDataSystem::AudioSaveCallback, _micDataSystem, std::placeholders::_1);
-    
-    // We only record a little extra time beyond what we're stuffing in below
-    constexpr uint32_t timeAfterTriggerEnd_ms = 170;
-    triggerJob->SetTimeToRecord(timeAfterTriggerEnd_ms);
-    const auto maxIndex = _procAudioRawComplete - _procAudioXferCount;
-    for (size_t i=0; i<maxIndex; ++i)
-    {
-      const auto& audioBlock = _immediateAudioBuffer[i].audioBlock;
-      triggerJob->CollectProcessedAudio(audioBlock.data(), audioBlock.size());
-    }
-    for (size_t i=0; i<_immediateAudioBuffer.size(); ++i)
-    {
-      const auto& audioBlock = _immediateAudioBuffer[i].audioBlock;
-      triggerJob->CollectRawAudio(audioBlock.data(), audioBlock.size());
-    }
-    const auto notStreamingJob = false;
-    _micDataSystem->AddMicDataJob(triggerJob, notStreamingJob);
-  }
+  // WireOS: never spawn the DEV_CHEATS "triggersOnly" WAV capture job (was saveTriggerOnly=true
+  // whenever ANKI_DEV_CHEATS). Continuous conversation made that path run every FakeTrigger.
 
   return mostRecentTimestamp;
 }
@@ -549,7 +493,6 @@ MicDirectionData MicDataProcessor::ProcessMicrophonesSE(const AudioUtil::AudioSa
   }
   
 #if ANKI_DEV_CHEATS
-  
   // Allow overriding (for testing) to force enable or disable mic data processing & force processing state
   if (kMicData_ForceEnableMicDataProc)
   {

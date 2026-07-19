@@ -82,14 +82,16 @@ AudioUtil::AudioChunkList MicDataInfo::GetProcessedAudio(size_t beginIndex)
 {
   std::lock_guard<std::mutex> lock(_dataMutex);
   AudioUtil::AudioChunkList copiedData;
-  auto currentSize = _processedAudioData.size();
+  const auto currentSize = _processedAudioData.size();
   if (beginIndex >= currentSize)
   {
     return copiedData;
   }
 
+  // Copy only the unsent suffix [beginIndex, currentSize).
   auto chunkIter = _processedAudioData.begin() + beginIndex;
-  while (chunkIter != _processedAudioData.end())
+  const auto endIter = _processedAudioData.begin() + currentSize;
+  while (chunkIter != endIter)
   {
     const auto& audioChunk = *chunkIter;
     ++chunkIter;
@@ -98,6 +100,12 @@ AudioUtil::AudioChunkList MicDataInfo::GetProcessedAudio(size_t beginIndex)
     std::copy(audioChunk.begin(), audioChunk.end(), newChunk.begin());
     copiedData.push_back(std::move(newChunk));
   }
+
+  // WireOS A1: drop already-streamed prefix AND the chunks we just copied.
+  // Concurrent CollectProcessedAudio may append after currentSize — those stay.
+  // Caller must reset its consume index to 0 after this returns (see MicDataSystem).
+  _processedAudioData.erase(_processedAudioData.begin(),
+                            _processedAudioData.begin() + currentSize);
   return copiedData;
 }
 
@@ -137,6 +145,22 @@ void MicDataInfo::UpdateForNextChunk()
   _timeRecorded_ms += kTimePerChunk_ms;
   if (_timeRecorded_ms >= _timeToRecord_ms)
   {
+    // WireOS: Xiaozhi stream jobs use saveToFile=false. Ending the job must always
+    // drop collect flags + buffers. Old path called ChooseNextFileNameBase even when
+    // not saving; on empty name it returned early → zombie Collect forever (~32KB/s RSS).
+    const bool needSaveName = _typesToSave.AreAnyFlagsSet() || _doFFTProcess;
+    if (!needSaveName)
+    {
+      _processedAudioData.clear();
+      _rawAudioData.clear();
+      _timeRecorded_ms = 0;
+      if (!_repeating)
+      {
+        _typesToCollect.ClearFlags();
+      }
+      return;
+    }
+
     std::string dirToReplace;
     std::string nextFileNameBase;
     if (!_writeNameBase.empty())
@@ -147,10 +171,19 @@ void MicDataInfo::UpdateForNextChunk()
     else
     {
       nextFileNameBase = ChooseNextFileNameBase(dirToReplace);
-      // If we fail to find a name with which to save a file, bail now
       if (nextFileNameBase.empty())
       {
+        // Still tear down collection — never leave a forever-growing buffer.
+        LOG_WARNING("MicDataInfo.UpdateForNextChunk.NoFileName",
+                    "ChooseNextFileNameBase empty — dropping collect buffers");
+        _processedAudioData.clear();
+        _rawAudioData.clear();
         _typesToSave.ClearFlags();
+        _timeRecorded_ms = 0;
+        if (!_repeating)
+        {
+          _typesToCollect.ClearFlags();
+        }
         return;
       }
     }
@@ -171,6 +204,17 @@ bool MicDataInfo::CheckDone() const
   return !_typesToCollect.AreAnyFlagsSet();
 }
 
+void MicDataInfo::ForceEndCollection()
+{
+  std::lock_guard<std::mutex> lock(_dataMutex);
+  _typesToCollect.ClearFlags();
+  _typesToSave.ClearFlags();
+  _processedAudioData.clear();
+  _rawAudioData.clear();
+  _timeToRecord_ms = 0;
+  _timeRecorded_ms = 0;
+}
+
 uint32_t MicDataInfo::GetTimeToRecord_ms() const
 {  
   std::lock_guard<std::mutex> lock(_dataMutex);
@@ -181,6 +225,22 @@ uint32_t MicDataInfo::GetTimeRecorded_ms() const
 {  
   std::lock_guard<std::mutex> lock(_dataMutex);
   return _timeRecorded_ms;
+}
+
+void MicDataInfo::GetDebugStats(size_t& outProcessedChunks,
+                                size_t& outRawChunks,
+                                uint32_t& outRecorded_ms,
+                                uint32_t& outToRecord_ms,
+                                bool& outCollectProcessed,
+                                bool& outCollectRaw) const
+{
+  std::lock_guard<std::mutex> lock(_dataMutex);
+  outProcessedChunks = _processedAudioData.size();
+  outRawChunks = _rawAudioData.size();
+  outRecorded_ms = _timeRecorded_ms;
+  outToRecord_ms = _timeToRecord_ms;
+  outCollectProcessed = _typesToCollect.IsBitFlagSet(MicDataType::Processed);
+  outCollectRaw = _typesToCollect.IsBitFlagSet(MicDataType::Raw);
 }
 
 void MicDataInfo::SaveCollectedAudio(const std::string& dataDirectory,

@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <mutex>
+#include <algorithm>
 
 #include <chrono>
 #include <thread>
@@ -33,6 +34,7 @@ namespace Vector {
 struct SpeechRecognizerPicovoice::SpeechRecognizerPicovoiceData
 {
   std::vector<AudioUtil::AudioSample> audioBuffer;
+  std::vector<AudioUtil::AudioSample> processFrame; // WireOS A2: reuse — avoid per-frame alloc
   pv_porcupine_object_t* pvObj = nullptr;
   std::recursive_mutex recogMutex;
   bool disabled = true;
@@ -101,6 +103,7 @@ bool SpeechRecognizerPicovoice::Init()
   struct stat st{};
 
   _impl->audioBuffer.reserve(512 * 2);
+  _impl->processFrame.resize(512);
 
   if (_impl->pvObj)
   {
@@ -161,15 +164,25 @@ void SpeechRecognizerPicovoice::Update(const AudioUtil::AudioSample* audioData, 
 
     _impl->audioBuffer.insert(_impl->audioBuffer.end(), audioData, audioData + audioDataLen);
 
+    if (_impl->processFrame.size() != frameLength) {
+        _impl->processFrame.resize(frameLength);
+    }
+
     while (_impl->audioBuffer.size() >= frameLength)
     {
-        std::vector<AudioUtil::AudioSample> frame(_impl->audioBuffer.begin(),
-                                                  _impl->audioBuffer.begin() + frameLength);
+        std::copy(_impl->audioBuffer.begin(),
+                  _impl->audioBuffer.begin() + frameLength,
+                  _impl->processFrame.begin());
 
         bool result = false;
-        if (pv_porcupine_process(_impl->pvObj, frame.data(), &result) != PV_STATUS_SUCCESS) {
+        const pv_status_t status = pv_porcupine_process(_impl->pvObj, _impl->processFrame.data(), &result);
+        // WireOS A2: always consume the frame — early return on error used to leave
+        // the same samples in audioBuffer forever and grow RSS (~32KB/s).
+        _impl->audioBuffer.erase(_impl->audioBuffer.begin(),
+                                 _impl->audioBuffer.begin() + frameLength);
+        if (status != PV_STATUS_SUCCESS) {
             LOG_ERROR("SpeechRecognizerPicovoice.Update", "pv process error");
-            return;
+            continue;
         }
         if (result) {
             AudioUtil::SpeechRecognizerCallbackInfo info{
@@ -180,8 +193,6 @@ void SpeechRecognizerPicovoice::Update(const AudioUtil::AudioSample* audioData, 
             };
             DoCallback(info);
         }
-        _impl->audioBuffer.erase(_impl->audioBuffer.begin(),
-                                 _impl->audioBuffer.begin() + frameLength);
     }
 }
 
