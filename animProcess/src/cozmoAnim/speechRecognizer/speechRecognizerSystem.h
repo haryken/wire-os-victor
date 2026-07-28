@@ -41,6 +41,7 @@ namespace Anki {
       class RobotDataLoader;
     }
     class SpeechRecognizerPicovoice;
+    class SpeechRecognizerTHF;
     class SpeechRecognizerPryonLite;
     namespace {
       struct TriggerModelTypeData;
@@ -142,11 +143,14 @@ private:
   };
   
   using TriggerContextPicovoice = TriggerContext<SpeechRecognizerPicovoice>;
+  using TriggerContextThf = TriggerContext<SpeechRecognizerTHF>;
   using TriggerContextPryon = TriggerContext<SpeechRecognizerPryonLite>;
   
   const Anim::AnimContext*                    _context = nullptr;
   MicData::MicDataSystem*                     _micDataSystem = nullptr;
-  std::unique_ptr<TriggerContextPicovoice>          _victorTrigger;
+  // WireOS dual wake: exactly one of these is set (see wake_engine flag).
+  std::unique_ptr<TriggerContextPicovoice>    _victorTrigger;
+  std::unique_ptr<TriggerContextThf>          _victorTriggerThf;
   
   std::unique_ptr<TriggerContextPryon>        _alexaTrigger;
   Alexa*                                      _alexaComponent = nullptr;
@@ -198,6 +202,7 @@ private:
   void ApplySpeechRecognizerLocaleUpdate(TriggerContext<SpeechRecognizerType>& aTrigger);
   
   bool UpdateRecognizerModel(TriggerContext<SpeechRecognizerPicovoice>& aTrigger);
+  bool UpdateRecognizerModel(TriggerContext<SpeechRecognizerTHF>& aTrigger);
   bool UpdateRecognizerModel(TriggerContext<SpeechRecognizerPryonLite>& aTrigger);
   
   // Console Var methods

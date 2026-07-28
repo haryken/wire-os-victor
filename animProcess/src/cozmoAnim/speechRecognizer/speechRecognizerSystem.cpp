@@ -18,7 +18,8 @@
 #include "cozmoAnim/animContext.h"
 #include "cozmoAnim/micData/micDataSystem.h"
 #include "cozmoAnim/robotDataLoader.h"
-#include "speechRecognizerPicovoice.h"                        // swapped in Picovoice
+#include "speechRecognizerPicovoice.h"                        // WireOS default wake
+#include "cozmoAnim/speechRecognizer/speechRecognizerTHFSimple.h" // optional Sensory THF
 #include "cozmoAnim/speechRecognizer/speechRecognizerPryonLite.h"
 #include "cozmoAnim/micData/notchDetector.h"
 #include "util/console/consoleInterface.h"
@@ -31,6 +32,8 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <fstream>
+#include <string>
 
 
 namespace Anki {
@@ -197,14 +200,18 @@ void SpeechRecognizerSystem::SetupConsoleFuncs()
 #if ANKI_DEV_CHEATS
   // Update Recognizer Model with kRecognizerModel & kRecognizerModelSensitivity enums
   auto updateVectorRecognizerModel = [this](ConsoleFunctionContextRef context) {
+    if (_victorTriggerThf) {
+      std::string result = UpdateRecognizerHelper(_vectorRecognizerModelTypeIndex, kVectorRecognizerModel,
+                                                  _vectorTriggerModelSensitivityIndex, kVectorRecognizerModelSensitivity,
+                                                  kThfTriggerModelDataList, *_victorTriggerThf.get());
+      context->channel->WriteLog("Update Vector Recognizer (THF) %s", result.c_str());
+      return;
+    }
     if (!_victorTrigger) {
       context->channel->WriteLog("'Hey Vector' Trigger is not active");
       return;
     }
-    std::string result = UpdateRecognizerHelper(_vectorRecognizerModelTypeIndex, kVectorRecognizerModel,
-                                                _vectorTriggerModelSensitivityIndex, kVectorRecognizerModelSensitivity,
-                                                kThfTriggerModelDataList, *_victorTrigger.get());
-    context->channel->WriteLog("Update Vector Recognizer %s", result.c_str());
+    context->channel->WriteLog("Picovoice wake active — locale/search console vars apply to THF only");
   };
 
   auto updateAlexaRecognizerModel = [this](ConsoleFunctionContextRef context) {
@@ -292,6 +299,9 @@ SpeechRecognizerSystem::~SpeechRecognizerSystem()
   if (_victorTrigger) {
     _victorTrigger->recognizer->Stop();
   }
+  if (_victorTriggerThf) {
+    _victorTriggerThf->recognizer->Stop();
+  }
   if (_alexaTrigger) {
     _alexaTrigger->recognizer->Stop();
   }
@@ -300,31 +310,80 @@ SpeechRecognizerSystem::~SpeechRecognizerSystem()
   DisableAlexa();
 }
 
+namespace {
+  // WireOS: /data/.../wake_engine — "picovoice" (default) or "thf"
+  const char* kWakeEnginePath = "/data/data/com.anki.victor/persistent/wake_engine";
+
+  bool UseThfWakeEngine()
+  {
+    std::ifstream in(kWakeEnginePath);
+    if (!in.is_open()) {
+      return false;
+    }
+    std::string line;
+    if (!std::getline(in, line)) {
+      return false;
+    }
+    // trim
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
+      line.pop_back();
+    }
+    for (char& c : line) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    return (line == "thf" || line == "sensory" || line == "hey_vector_thf");
+  }
+}
+
 void SpeechRecognizerSystem::InitVector(const Anim::RobotDataLoader& dataLoader,
                                         const Util::Locale& locale,
                                         TriggerWordDetectedCallback callback)
 {
-  if (_victorTrigger) {
+  if (_victorTrigger || _victorTriggerThf) {
     LOG_WARNING("SpeechRecognizerSystem.InitVector", "Victor Recognizer is already running");
     return;
   }
   
   const bool useVad = true;
-  _victorTrigger = std::make_unique<TriggerContext<SpeechRecognizerPicovoice>>("Vector", useVad);
-  _victorTrigger->recognizer->Init();  
-  _victorTrigger->recognizer->SetCallback(callback);
-  //_victorTrigger->recognizer->Start();
-  _victorTrigger->micTriggerConfig->Init("hey_vector_thf", dataLoader.GetMicTriggerConfig());
-  
+  const bool useThf = UseThfWakeEngine();
+
+  if (useThf) {
+    LOG_INFO("SpeechRecognizerSystem.InitVector", "Wake engine: Sensory THF (stock Hey Vector)");
+    _victorTriggerThf = std::make_unique<TriggerContextThf>("Vector", useVad);
+    _victorTriggerThf->recognizer->Init("");
+    _victorTriggerThf->recognizer->SetCallback(callback);
+    _victorTriggerThf->recognizer->Start();
+    _victorTriggerThf->micTriggerConfig->Init("hey_vector_thf", dataLoader.GetMicTriggerConfig());
+
 #if ANKI_DEVELOPER_CODE
-  const auto& triggerDataList = _victorTrigger->micTriggerConfig->GetAllTriggerModelFiles();
-  for (const auto& filePath : triggerDataList) {
-    const auto& fullFilePath = Util::FileUtils::FullFilePath( {_triggerWordDataDir, filePath} );
-    if (Util::FileUtils::FileDoesNotExist(fullFilePath)) {
-      LOG_WARNING("SpeechRecognizerSystem.InitVector.MicTriggerConfigFileMissing","%s",fullFilePath.c_str());
+    const auto& triggerDataList = _victorTriggerThf->micTriggerConfig->GetAllTriggerModelFiles();
+    for (const auto& filePath : triggerDataList) {
+      const auto& fullFilePath = Util::FileUtils::FullFilePath( {_triggerWordDataDir, filePath} );
+      if (Util::FileUtils::FileDoesNotExist(fullFilePath)) {
+        LOG_WARNING("SpeechRecognizerSystem.InitVector.MicTriggerConfigFileMissing","%s",fullFilePath.c_str());
+      }
     }
-  }
 #endif
+  } else {
+    LOG_INFO("SpeechRecognizerSystem.InitVector", "Wake engine: Picovoice Porcupine");
+    _victorTrigger = std::make_unique<TriggerContextPicovoice>("Vector", useVad);
+    _victorTrigger->recognizer->Init();
+    _victorTrigger->recognizer->SetCallback(callback);
+    //_victorTrigger->recognizer->Start();
+    _victorTrigger->micTriggerConfig->Init("hey_vector_thf", dataLoader.GetMicTriggerConfig());
+
+#if ANKI_DEVELOPER_CODE
+    const auto& triggerDataList = _victorTrigger->micTriggerConfig->GetAllTriggerModelFiles();
+    for (const auto& filePath : triggerDataList) {
+      const auto& fullFilePath = Util::FileUtils::FullFilePath( {_triggerWordDataDir, filePath} );
+      if (Util::FileUtils::FileDoesNotExist(fullFilePath)) {
+        LOG_WARNING("SpeechRecognizerSystem.InitVector.MicTriggerConfigFileMissing","%s",fullFilePath.c_str());
+      }
+    }
+#endif
+  }
   
   UpdateTriggerForLocale(locale, RecognizerTypeFlag::VectorMic);
 }
@@ -376,6 +435,9 @@ void SpeechRecognizerSystem::Update(const AudioUtil::AudioSample * audioData, un
   if (_victorTrigger && (vadActive || !_victorTrigger->useVad)) {
     _victorTrigger->recognizer->Update(audioData, audioDataLen);
   }
+  if (_victorTriggerThf && (vadActive || !_victorTriggerThf->useVad)) {
+    _victorTriggerThf->recognizer->Update(audioData, audioDataLen);
+  }
   
   if (_isAlexaActive) {
     if (!_isDisableAlexaPending) {
@@ -399,10 +461,11 @@ bool SpeechRecognizerSystem::UpdateTriggerForLocale(const Util::Locale& newLocal
 {
   // Set local using defualt locale settings
   bool success = false;
-  // if (_victorTrigger &&
-  //     (RecognizerTypeFlag::VectorMic & recognizerFlags) == RecognizerTypeFlag::VectorMic) {
-  //   success = UpdateTriggerForLocale(*_victorTrigger.get(), newLocale, MicData::MicTriggerConfig::ModelType::Count, -1);
-  // }
+  // Picovoice ignores net/search locale; THF reloads Sensory models for en-US/AU/GB/…
+  if (_victorTriggerThf &&
+      (RecognizerTypeFlag::VectorMic & recognizerFlags) == RecognizerTypeFlag::VectorMic) {
+    success = UpdateTriggerForLocale(*_victorTriggerThf.get(), newLocale, MicData::MicTriggerConfig::ModelType::Count, -1);
+  }
   
   if (AlexaLocaleEnabled(newLocale)) {
     if (_alexaTrigger &&
@@ -574,6 +637,9 @@ void SpeechRecognizerSystem::ApplyLocaleUpdate()
   if (_victorTrigger) {
     ApplySpeechRecognizerLocaleUpdate(*_victorTrigger.get());
   }
+  if (_victorTriggerThf) {
+    ApplySpeechRecognizerLocaleUpdate(*_victorTriggerThf.get());
+  }
   
   if (_alexaTrigger) {
     ApplySpeechRecognizerLocaleUpdate(*_alexaTrigger.get());
@@ -617,27 +683,32 @@ void SpeechRecognizerSystem::ApplySpeechRecognizerLocaleUpdate(TriggerContext<Sp
 
 bool SpeechRecognizerSystem::UpdateRecognizerModel(TriggerContext<SpeechRecognizerPicovoice>& aTrigger)
 {
-  // bool success = false;
-  // SpeechRecognizerPicovoice* recognizer = static_cast<SpeechRecognizerPicovoice*>(aTrigger.recognizer.get());
-  // MicData::MicTriggerConfig::TriggerDataPaths& currentTrigPathRef = aTrigger.currentTriggerPaths;
-  // recognizer->SetRecognizerIndex( AudioUtil::SpeechRecognizer::InvalidIndex );
-  // const AudioUtil::SpeechRecognizer::IndexType singleSlotIndex = 0;
-  // recognizer->RemoveRecognitionData( singleSlotIndex );
-  
-  // if (currentTrigPathRef.IsValid()) {
-  //   const std::string netFilePath = currentTrigPathRef.GenerateNetFilePath( _triggerWordDataDir );
-  //   const std::string searchFilePath = currentTrigPathRef.GenerateSearchFilePath( _triggerWordDataDir );
-  //   const bool isPhraseSpotted = true;
-  //   const bool allowsFollowUpRecog = false;
-  //   success = recognizer->AddRecognitionDataFromFile( singleSlotIndex, netFilePath, searchFilePath,
-  //                                                     isPhraseSpotted, allowsFollowUpRecog );
-  //   if ( success ) {
-  //     recognizer->SetRecognizerIndex( singleSlotIndex );
-  //   }
-  // }
-
-  // return success;
+  // Picovoice loads .ppn in Init(); locale net/search paths are unused.
   return true;
+}
+
+bool SpeechRecognizerSystem::UpdateRecognizerModel(TriggerContext<SpeechRecognizerTHF>& aTrigger)
+{
+  bool success = false;
+  SpeechRecognizerTHF* recognizer = aTrigger.recognizer.get();
+  MicData::MicTriggerConfig::TriggerDataPaths& currentTrigPathRef = aTrigger.currentTriggerPaths;
+  recognizer->SetRecognizerIndex( AudioUtil::SpeechRecognizer::InvalidIndex );
+  const AudioUtil::SpeechRecognizer::IndexType singleSlotIndex = 0;
+  recognizer->RemoveRecognitionData( singleSlotIndex );
+  
+  if (currentTrigPathRef.IsValid()) {
+    const std::string netFilePath = currentTrigPathRef.GenerateNetFilePath( _triggerWordDataDir );
+    const std::string searchFilePath = currentTrigPathRef.GenerateSearchFilePath( _triggerWordDataDir );
+    const bool isPhraseSpotted = true;
+    const bool allowsFollowUpRecog = false;
+    success = recognizer->AddRecognitionDataFromFile( singleSlotIndex, netFilePath, searchFilePath,
+                                                      isPhraseSpotted, allowsFollowUpRecog );
+    if ( success ) {
+      recognizer->SetRecognizerIndex( singleSlotIndex );
+    }
+  }
+
+  return success;
 }
 
 bool SpeechRecognizerSystem::UpdateRecognizerModel(TriggerContext<SpeechRecognizerPryonLite>& aTrigger)

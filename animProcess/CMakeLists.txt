@@ -7,6 +7,7 @@ include(aubio)
 include(flatbuffers)
 include(opencv)
 include(picovoice)
+include(sensory)
 include(text2speech)
 include(pryon_lite)
 include(robot_core)
@@ -56,6 +57,7 @@ target_link_libraries(victor_anim
   libev
   # vendor
   pv_porcupine
+  ${SENSORY_LIBS}
   ${OPENCV_LIBS}
   ${FLATBUFFERS_LIBS}
   signal_essence
