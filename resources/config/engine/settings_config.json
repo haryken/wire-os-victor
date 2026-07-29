@@ -32,7 +32,7 @@
   },
   "locale" :
   {
-    "defaultValue" : "en-US",
+    "defaultValue" : "en-AU",
     "updateCloudOnChange" : true
   },
   "master_volume" :

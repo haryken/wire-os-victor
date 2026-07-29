@@ -311,18 +311,19 @@ SpeechRecognizerSystem::~SpeechRecognizerSystem()
 }
 
 namespace {
-  // WireOS: /data/.../wake_engine — "picovoice" (default) or "thf"
+  // WireOS: /data/.../wake_engine — "thf" (OTA default) or "picovoice"
   const char* kWakeEnginePath = "/data/data/com.anki.victor/persistent/wake_engine";
 
   bool UseThfWakeEngine()
   {
     std::ifstream in(kWakeEnginePath);
     if (!in.is_open()) {
-      return false;
+      // Missing file → Sensory THF (stock Hey Vector) for WireOS OTA default
+      return true;
     }
     std::string line;
     if (!std::getline(in, line)) {
-      return false;
+      return true;
     }
     // trim
     while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
@@ -333,7 +334,11 @@ namespace {
         c = static_cast<char>(c - 'A' + 'a');
       }
     }
-    return (line == "thf" || line == "sensory" || line == "hey_vector_thf");
+    // Explicit Picovoice only when file says so; everything else (incl. empty) → THF
+    if (line == "picovoice" || line == "pv" || line == "porcupine" || line == "custom") {
+      return false;
+    }
+    return true;
   }
 }
 
