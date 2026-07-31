@@ -20,8 +20,6 @@
 #include "cozmoAnim/audio/microphoneAudioClient.h"
 #include "cozmoAnim/audio/engineRobotAudioInput.h"
 #include "cozmoAnim/audio/sdkAudioComponent.h"
-
-#include <unistd.h>
 #include "cozmoAnim/animation/animationStreamer.h"
 #include "cozmoAnim/animation/streamingAnimationModifier.h"
 #include "cozmoAnim/backpackLights/animBackpackLightComponent.h"
@@ -43,8 +41,6 @@
 
 #include "util/cpuProfiler/cpuProfiler.h"
 #include "util/logging/logging.h"
-
-#include <unistd.h>
 
 #define LOG_CHANNEL    "AnimEngine"
 #define NUM_ANIM_OPENCV_THREADS 0
@@ -187,12 +183,6 @@ Result AnimEngine::Update(const BaseStationTime_t currTime_nanosec)
   DEV_ASSERT(_animationStreamer, "AnimEngine.Update.InvalidAnimationStreamer");
   DEV_ASSERT(_streamingAnimationModifier, "AnimEngine.Update.InvalidStreamingAnimationModifier");
   DEV_ASSERT(_sdkAudioComponent, "AnimEngine.Update.InvalidSdkComponent");
-
-  // Plan B: Xiaozhi TTS is ALSA from vic-cloud — do not poll xiaozhi-* ExternalAudio
-  // flags or StartStreamPCM here (that path ballooned Wwise RSS). Mic still uses
-  // xiaozhi-busy / xiaozhi-relisten in MicDataSystem. SDK ExternalAudio (apps) still
-  // goes through SdkAudioComponent message handlers + Update().
-  _sdkAudioComponent->Update();
 
 #if ANKI_PROFILE_ANIMCOMMS_SOCKET_BUFFER_STATS
   {

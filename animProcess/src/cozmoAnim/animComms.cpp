@@ -21,7 +21,6 @@
 #include "util/histogram/histogram.h"
 #include "util/logging/logging.h"
 
-#include <cerrno>
 #include <thread>
 #include <stdio.h>
 
@@ -206,11 +205,6 @@ bool SendPacketToEngine(const void *buffer, const u32 length)
 
   const ssize_t bytesSent = _engineComms.Send((char*)buffer, length);
   if (bytesSent < (ssize_t) length) {
-    // Temporary socket pressure (EAGAIN) — LocalUdpServer already logged.
-    // Retry next tick; disconnecting here was raising fault 915 while idle.
-    if (bytesSent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      return false;
-    }
     LOG_ERROR("AnimComms.SendPacketToEngine.FailedSend",
               "Failed to send msg contents (%zd of %d bytes sent)",
               bytesSent, length);
@@ -245,10 +239,7 @@ bool SendPacketToRobot(const void *buffer, const u32 length)
 
   const ssize_t bytesSent = _robotComms.Send((const char*)buffer, length);
   if (bytesSent < (ssize_t) length) {
-    if (bytesSent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      return false;
-    }
-    LOG_ERROR("AnimComms.SendPacketToRobot.FailedSend", "Failed to send msg contents (%zd bytes sent)", bytesSent);
+    LOG_ERROR("SendPacketToRobot.FailedSend", "Failed to send msg contents (%zd bytes sent)", bytesSent);
     DisconnectRobot();
     return false;
   }
