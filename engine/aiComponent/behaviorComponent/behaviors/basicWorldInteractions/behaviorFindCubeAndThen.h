@@ -63,6 +63,11 @@ private:
     std::string                       followUpBehaviorID;
     ICozmoBehaviorPtr                 followUpBehavior;
     bool                              skipConnectToCubeBehavior;
+    // If true and a lightcube was observed recently, skip FindCube + DriveToPredock
+    // and go straight to followUp (Keepaway / PopAWheelie). Falls back to FindCube
+    // when no fresh observation or robot is on charger.
+    bool                              skipFindIfCubeVisible;
+    float                             skipFindMaxCubeAge_s;
   };
 
   struct DynamicVariables {
@@ -79,6 +84,9 @@ private:
   void TransitionToAttemptConnection();
   void TransitionToFollowUpBehavior();
   void TransitionToGetOutFailure();
+
+  // Returns true and sets _dVars.cubeID when a lightcube was seen within skipFindMaxCubeAge_s.
+  bool TryGetRecentlyVisibleCube();
 
   // Returns a pointer to the object belonging with ID == _dVars.cubeID, nullptr if none is found
   ObservableObject* GetTargetCube();

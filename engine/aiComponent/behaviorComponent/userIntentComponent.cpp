@@ -55,8 +55,11 @@ namespace Vector {
 
 namespace {
 
-static const size_t kMaxTicksToClear = 3;
-static const size_t kMaxTicksToClear_Extended = 120;
+  // Stock Anki: 3 ticks (~100ms). Too short for Xiaozhi MCP intents injected mid-stream
+  // while GlobalInterruptions / VoiceFeatures need a moment to interrupt (e.g. on charger).
+  // Dropped intents show as PendingIntentNotCleared.ForceClear → robot never dances.
+  static const size_t kMaxTicksToClear = 90;
+  static const size_t kMaxTicksToClear_Extended = 120;
 static const float kTimeToClearWaitingForTriggerWordGetIn_s = 3.0f;
 static const char* kCloudIntentJsonKey = "intent";
 static const char* kParamsKey = "params";

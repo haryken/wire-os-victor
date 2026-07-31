@@ -21,7 +21,10 @@
       "behaviorName" : "FindCubeAndThenDoATrick",
       "behaviorClass" : "FindCubeAndThen",
     
-      "followUpBehaviorID" : "CubeTrickDispatcher"
+      "followUpBehaviorID" : "CubeTrickDispatcher",
+      "skipConnectToCubeBehavior" : true,
+      "skipFindIfCubeVisible" : true,
+      "skipFindMaxCubeAge_s" : 5.0
     }
   ]
 }

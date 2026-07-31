@@ -22,16 +22,44 @@
       },
       {
         "conditionType": "ObstacleDetected"
+      },
+      {
+        // Don't steal Keepaway/PopAWheelie while their voice intent is pending
+        // (prox often fires on the cube itself).
+        "conditionType": "Compound",
+        "not": {
+          "conditionType": "UserIntentPending",
+          "list": [
+            {"type": "play_keepaway"},
+            {"type": "play_popawheelie"},
+            {"type": "play_rollcube"},
+            {"type": "play_anytrick"}
+          ]
+        }
       }
     ]
   },
   
   "wantsToCancelSelfCondition": {
     "conditionType": "Compound",
-    "not": {
-      "conditionType": "OffTreadsState",
-      "targetState": "OnTreads"
-    }
+    "or": [
+      {
+        "conditionType": "Compound",
+        "not": {
+          "conditionType": "OffTreadsState",
+          "targetState": "OnTreads"
+        }
+      },
+      {
+        "conditionType": "UserIntentPending",
+        "list": [
+          {"type": "play_keepaway"},
+          {"type": "play_popawheelie"},
+          {"type": "play_rollcube"},
+          {"type": "play_anytrick"}
+        ]
+      }
+    ]
   },
   
   "anonymousBehaviors": [
@@ -45,6 +73,3 @@
     }
   ]
 }
-
-
-

@@ -16,6 +16,13 @@
     "ReactToRobotShaken",
     "ReactToTouchPetting",
     "SimpleVoiceResponses", // these are simple voice commands that we want to ignore obstacles
+    // Cube play must beat ReactToObstacle: prox often sees the cube/hand as a "sudden
+    // obstacle" and ForceClears play_keepaway before VoiceFeatures can run (~90 ticks).
+    // Keep above ReactToObstacle like SimpleVoiceResponses; no FakeTrigger/mic reopen.
+    "KeepawayVoiceCommand",
+    "PopAWheelieVoiceCommand",
+    "RollCubeVoiceCommand",
+    "DoATrickVoiceCommand",
     "ReactToObstacle",
     "SingletonPounceDispatcher",
     "VoiceFeatures",

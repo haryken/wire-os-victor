@@ -22,10 +22,12 @@
 #include "engine/aiComponent/behaviorComponent/behaviorExternalInterface/beiRobotInfo.h"
 #include "engine/aiComponent/behaviorComponent/behaviors/basicWorldInteractions/behaviorFindCube.h"
 #include "engine/blockWorld/blockWorld.h"
+#include "engine/blockWorld/blockWorldFilter.h"
 #include "engine/components/cubes/cubeConnectionCoordinator.h"
 #include "engine/components/sensors/proxSensorComponent.h"
 
 #include "coretech/common/engine/utils/timer.h"
+#include "util/logging/logging.h"
 
 #define LOG_CHANNEL "Behaviors"
 
@@ -40,11 +42,16 @@ namespace Vector {
 namespace{
 const char* const kFollowUpBehaviorKey = "followUpBehaviorID";
 const char* const kSkipConnectToCubeBehaviorKey = "skipConnectToCubeBehavior";
+const char* const kSkipFindIfCubeVisibleKey = "skipFindIfCubeVisible";
+const char* const kSkipFindMaxCubeAgeKey = "skipFindMaxCubeAge_s";
+const float kDefaultSkipFindMaxCubeAge_s = 5.0f;
 } // namespace
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 BehaviorFindCubeAndThen::InstanceConfig::InstanceConfig()
 : skipConnectToCubeBehavior(true) //default to true and override for user driven instances
+, skipFindIfCubeVisible(false)
+, skipFindMaxCubeAge_s(kDefaultSkipFindMaxCubeAge_s)
 {
 }
 
@@ -61,6 +68,8 @@ BehaviorFindCubeAndThen::BehaviorFindCubeAndThen(const Json::Value& config)
 {
   JsonTools::GetValueOptional(config, kFollowUpBehaviorKey, _iConfig.followUpBehaviorID);
   JsonTools::GetValueOptional(config, kSkipConnectToCubeBehaviorKey, _iConfig.skipConnectToCubeBehavior);
+  JsonTools::GetValueOptional(config, kSkipFindIfCubeVisibleKey, _iConfig.skipFindIfCubeVisible);
+  JsonTools::GetValueOptional(config, kSkipFindMaxCubeAgeKey, _iConfig.skipFindMaxCubeAge_s);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -98,7 +107,9 @@ void BehaviorFindCubeAndThen::GetBehaviorJsonKeys(std::set<const char*>& expecte
 {
   const char* list[] = {
     kFollowUpBehaviorKey,
-    kSkipConnectToCubeBehaviorKey
+    kSkipConnectToCubeBehaviorKey,
+    kSkipFindIfCubeVisibleKey,
+    kSkipFindMaxCubeAgeKey
   };
   expectedKeys.insert( std::begin(list), std::end(list) );
 }
@@ -126,10 +137,64 @@ void BehaviorFindCubeAndThen::InitBehavior()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+bool BehaviorFindCubeAndThen::TryGetRecentlyVisibleCube()
+{
+  BlockWorldFilter filter;
+  filter.AddFilterFcn(&BlockWorldFilter::IsLightCubeFilter);
+
+  const ObservableObject* obj = GetBEI().GetBlockWorld().FindMostRecentlyObservedObject(filter);
+  if(obj == nullptr){
+    return false;
+  }
+
+  const RobotTimeStamp_t cubeTime_ms = obj->GetLastObservedTime();
+  const RobotTimeStamp_t lastImage_ms = GetBEI().GetRobotInfo().GetLastImageTimeStamp();
+  const RobotTimeStamp_t maxAge_ms =
+    static_cast<RobotTimeStamp_t>(1000.f * _iConfig.skipFindMaxCubeAge_s);
+
+  if(cubeTime_ms + maxAge_ms < lastImage_ms){
+    return false;
+  }
+
+  _dVars.cubeID = obj->GetID();
+  return true;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void BehaviorFindCubeAndThen::OnBehaviorActivated() 
 {
   // reset dynamic variables
   _dVars = DynamicVariables();
+
+  PRINT_NAMED_INFO("KeepawayFlow",
+                   "FindCubeAndThen step=activated followUp=%s skipConnect=%d skipFindIfVisible=%d",
+                   _iConfig.followUpBehaviorID.c_str(),
+                   _iConfig.skipConnectToCubeBehavior ? 1 : 0,
+                   _iConfig.skipFindIfCubeVisible ? 1 : 0);
+
+  // 3A: logo already seen recently + off charger → straight to Keepaway (no FindCube / DriveToPredock).
+  const bool onCharger = GetBEI().GetRobotInfo().IsOnChargerContacts();
+  const bool hasFreshCube = _iConfig.skipFindIfCubeVisible && TryGetRecentlyVisibleCube();
+  if(_iConfig.skipFindIfCubeVisible && !onCharger && hasFreshCube){
+    PRINT_NAMED_INFO("KeepawayFlow",
+                     "FindCubeAndThen step=skip_FindCube cube=%d ageMax_s=%.1f followUp=%s",
+                     _dVars.cubeID.GetValue(),
+                     _iConfig.skipFindMaxCubeAge_s,
+                     _iConfig.followUpBehaviorID.c_str());
+    auto& ccc = GetBEI().GetCubeConnectionCoordinator();
+    ccc.SubscribeToCubeConnection(this);
+    TransitionToFollowUpBehavior();
+    return;
+  }
+
+  if(_iConfig.skipFindIfCubeVisible){
+    PRINT_NAMED_INFO("KeepawayFlow",
+                     "FindCubeAndThen step=FindCube (no skip: onCharger=%d hasFreshCube=%d) followUp=%s",
+                     onCharger ? 1 : 0,
+                     hasFreshCube ? 1 : 0,
+                     _iConfig.followUpBehaviorID.c_str());
+    _dVars.cubeID = ObjectID();
+  }
 
   TransitionToFindCube();
 }
@@ -147,6 +212,8 @@ void BehaviorFindCubeAndThen::BehaviorUpdate()
 void BehaviorFindCubeAndThen::TransitionToFindCube()
 {
   SET_STATE(FindCube);
+  PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=FindCube followUp=%s",
+                   _iConfig.followUpBehaviorID.c_str());
 
   if(_iConfig.findCubeBehavior->WantsToBeActivated()){
     DelegateIfInControl(_iConfig.findCubeBehavior.get(),
@@ -154,7 +221,12 @@ void BehaviorFindCubeAndThen::TransitionToFindCube()
         _dVars.cubeID = _iConfig.findCubeBehavior->GetFoundCubeID();
         auto* targetCube = GetTargetCube(); 
         if(nullptr != targetCube){
+          PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=cube_found id=%d followUp=%s",
+                           _dVars.cubeID.GetValue(), _iConfig.followUpBehaviorID.c_str());
           TransitionToDriveToPredockPose();
+        } else {
+          PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=cube_NOT_found followUp=%s — exit",
+                           _iConfig.followUpBehaviorID.c_str());
         } //else just exit, the get-out will have been handled by the findCubeBehavior since it didn't find anything
       });
   }
@@ -164,6 +236,8 @@ void BehaviorFindCubeAndThen::TransitionToFindCube()
 void BehaviorFindCubeAndThen::TransitionToDriveToPredockPose()
 {
   SET_STATE(DriveToPredockPose);
+  PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=DriveToPredock followUp=%s",
+                   _iConfig.followUpBehaviorID.c_str());
 
   DelegateIfInControl( new DriveToObjectAction( _dVars.cubeID, PreActionPose::ActionType::DOCKING ),
                        &BehaviorFindCubeAndThen::TransitionToAttemptConnection );
@@ -173,6 +247,9 @@ void BehaviorFindCubeAndThen::TransitionToDriveToPredockPose()
 void BehaviorFindCubeAndThen::TransitionToAttemptConnection()
 {
   SET_STATE(AttemptConnection);
+  PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=AttemptConnection skip=%d followUp=%s",
+                   _iConfig.skipConnectToCubeBehavior ? 1 : 0,
+                   _iConfig.followUpBehaviorID.c_str());
 
   if(_iConfig.skipConnectToCubeBehavior){
     auto& ccc = GetBEI().GetCubeConnectionCoordinator();
@@ -199,6 +276,9 @@ void BehaviorFindCubeAndThen::TransitionToAttemptConnection()
 void BehaviorFindCubeAndThen::TransitionToFollowUpBehavior()
 {
   SET_STATE(FollowUpBehavior);
+  PRINT_NAMED_INFO("KeepawayFlow", "FindCubeAndThen step=FollowUp followUp=%s wants=%d",
+                   _iConfig.followUpBehaviorID.c_str(),
+                   (nullptr != _iConfig.followUpBehavior && _iConfig.followUpBehavior->WantsToBeActivated()) ? 1 : 0);
   if(nullptr != _iConfig.followUpBehavior && _iConfig.followUpBehavior->WantsToBeActivated()){
     // Let the behavior end when the followup does
     DelegateIfInControl(_iConfig.followUpBehavior.get());

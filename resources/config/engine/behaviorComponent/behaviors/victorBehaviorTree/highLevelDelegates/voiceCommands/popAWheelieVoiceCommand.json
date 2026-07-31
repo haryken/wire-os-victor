@@ -9,13 +9,15 @@
     }
   ],
 
-   "wantsToBeActivatedCondition": {
+  "wantsToBeActivatedCondition": {
     "conditionType": "FeatureGate",
     "feature": "PopAWheelie"
-  }, 
+  },
 
   "followUpBehaviorID" : "PopAWheelie",
-  "skipConnectToCubeBehavior" : false,
+  "skipConnectToCubeBehavior" : true,
+  "skipFindIfCubeVisible" : true,
+  "skipFindMaxCubeAge_s" : 5.0,
 
   "postBehaviorSuggestion": "Nothing"
 }

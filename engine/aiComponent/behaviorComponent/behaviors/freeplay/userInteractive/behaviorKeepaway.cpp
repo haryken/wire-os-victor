@@ -201,6 +201,12 @@ void BehaviorKeepaway::OnBehaviorActivated()
   // Initialize time stamps for various timeouts
   _dVars.gameStartTime_s = GetCurrentTimeInSeconds();
 
+  PRINT_NAMED_INFO("KeepawayFlow",
+                   "step=activated soloExitPounces=%d unmovedTimeout_s=%.1f unseenTimeout_s=%.1f",
+                   _dVars.pounceCountToExit,
+                   _iConfig.targetUnmovedGameEndTimeout_s,
+                   _iConfig.noVisibleTargetGameEndTimeout_s);
+
   GetBEI().GetMoodManager().TriggerEmotionEvent("KeepawayStarted");
 
   // push driving animations for creeping
@@ -213,6 +219,10 @@ void BehaviorKeepaway::OnBehaviorActivated()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void BehaviorKeepaway::OnBehaviorDeactivated()
 {
+  PRINT_NAMED_INFO("KeepawayFlow",
+                   "step=deactivated pounces=%d lastState=%s",
+                   _dVars.pounceCount,
+                   GetDebugStateName().c_str());
   auto& robotInfo = GetBEI().GetRobotInfo();
   robotInfo.GetDrivingAnimationHandler().RemoveDrivingAnimations(GetDebugLabel());
 }
@@ -304,12 +314,14 @@ void BehaviorKeepaway::CheckGetOutTimeOuts()
       // just keep playing until we exit from too much success, or someone engages
       if(_dVars.pounceCount == _dVars.pounceCountToExit - 1){
         _dVars.soloExitAfterNextPounce = true;
+        PRINT_NAMED_INFO("KeepawayFlow", "step=solo_exit_armed afterPounce=%d", _dVars.pounceCountToExit);
         return;
       }
     }
     else if( ( _iConfig.targetUnmovedGameEndTimeout_s > 0.0f ) &&
            ( timeSinceMoved > _iConfig.targetUnmovedGameEndTimeout_s) ){
       victorIsBored = true;
+      PRINT_NAMED_INFO("KeepawayFlow", "step=bored_unmoved after_s=%.1f", _iConfig.targetUnmovedGameEndTimeout_s);
       PRINT_CH_INFO(kLogChannelName,
                     "BehaviorKeepaway.GameEndTimeout",
                     "Victor got bored and quit because the cube didn't move for %f seconds",
@@ -320,6 +332,7 @@ void BehaviorKeepaway::CheckGetOutTimeOuts()
     if( (_iConfig.noVisibleTargetGameEndTimeout_s > 0.0f) &&
         (GetCurrentTimeInSeconds() - status.lastObservedTime_s) > _iConfig.noVisibleTargetGameEndTimeout_s){
       victorIsBored = true;
+      PRINT_NAMED_INFO("KeepawayFlow", "step=bored_unseen after_s=%.1f", _iConfig.noVisibleTargetGameEndTimeout_s);
       PRINT_CH_INFO(kLogChannelName,
                     "BehaviorKeepaway.GameEndTimeout",
                     "Victor got bored and quit because his cube was hidden for %f seconds",
@@ -330,6 +343,7 @@ void BehaviorKeepaway::CheckGetOutTimeOuts()
   if( KeepawayState::Stalking == _dVars.state &&
       _dVars.outOfPlayExitTime_s != 0.0f &&
       GetCurrentTimeInSeconds() > _dVars.outOfPlayExitTime_s ){
+    PRINT_NAMED_INFO("KeepawayFlow", "step=bored_out_of_play after_s=%.1f", _iConfig.outOfPlayGameEndTimeout_s);
     PRINT_CH_INFO(kLogChannelName,
                   "BehaviorKeepaway.OutOfPlayTimeout",
                   "Victor got bored and quit because his cube was out of play for %f seconds",

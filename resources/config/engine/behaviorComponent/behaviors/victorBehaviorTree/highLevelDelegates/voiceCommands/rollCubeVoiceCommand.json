@@ -16,7 +16,9 @@
   },
 
   "followUpBehaviorID" : "PlayRollBlock",
-  "skipConnectToCubeBehavior" : false,
+  "skipConnectToCubeBehavior" : true,
+  "skipFindIfCubeVisible" : true,
+  "skipFindMaxCubeAge_s" : 5.0,
 
   "postBehaviorSuggestion": "Nothing"
 }

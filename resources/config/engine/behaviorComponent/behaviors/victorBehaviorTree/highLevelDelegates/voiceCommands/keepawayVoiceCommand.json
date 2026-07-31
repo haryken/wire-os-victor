@@ -1,0 +1,23 @@
+{
+  "behaviorID" : "KeepawayVoiceCommand",
+  "behaviorClass" : "FindCubeAndThen",
+  "associatedActiveFeature": "Keepaway",
+
+  "respondToUserIntents" : [
+    {
+      "type" : "play_keepaway"
+    }
+  ],
+
+  "wantsToBeActivatedCondition": {
+    "conditionType": "FeatureGate",
+    "feature": "Keepaway"
+  },
+
+  "followUpBehaviorID" : "Keepaway",
+  "skipConnectToCubeBehavior" : true,
+  "skipFindIfCubeVisible" : true,
+  "skipFindMaxCubeAge_s" : 5.0,
+
+  "postBehaviorSuggestion": "Nothing"
+}
