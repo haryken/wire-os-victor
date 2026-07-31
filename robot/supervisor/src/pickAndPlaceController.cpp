@@ -167,7 +167,9 @@ namespace Anki {
         const f32 _facePlantLiftTime_ms = 1000;
         const f32 _facePlantTimeout_ms = 500;
 
-        const u32 _kPopAWheelieTimeout_ms = 500;
+        // Stock 500ms often times out before pitch reaches Verify's 1.0 rad (~57°),
+        // so engine ends PopAWheelie as UNEXPECTED_PITCH_ANGLE after one short shove.
+        const u32 _kPopAWheelieTimeout_ms = 1000;
 
         // Cliff alignment to white line
         typedef enum {

@@ -6,6 +6,9 @@
   "wantsToBeActivatedCondition": {
     "conditionType" : "FeatureGate",
     "feature" : "PopAWheelie"
-  }
+  },
 
+  "numRetries": 3,
+  "sayName": false,
+  "playCubeReaction": false
 }
