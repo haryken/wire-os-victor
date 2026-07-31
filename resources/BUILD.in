@@ -8,6 +8,10 @@ asset_project(
                 ('assets', 'LocalizedStrings/**/*.json'),
 		('assets', 'faceOverlays/*.jpg'),
                 ('3rd/pryon_lite', 'pryonSpeechRecModels/**/*.bin'),
+                # Sensory THF "Hey Vector" (+ Alexa THF nets). Symlink under
+                # assets/ is not enough — asset packaging must list these files
+                # or OTA ships without sensorySpeechRecModels and THF wake fails.
+                ('3rd/sensory', 'sensorySpeechRecModels/**/*'),
                 ('externals/animation-assets', 'animations/**/*.bin'),
                 ('externals/animation-assets', 'animationGroups/**/*.json'),
                 ('externals/animation-assets', 'sprites/**/*.png'),
