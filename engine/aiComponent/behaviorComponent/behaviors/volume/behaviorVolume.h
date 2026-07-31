@@ -26,7 +26,7 @@ class SettingsManager;
 // note that if you're changing this enum, you're likely to also want to change
 // kVolumeLevelMap and kVolumeLevelAnimMap in behaviorVolume.cpp.
 enum class EVolumeLevel : uint32_t {
-  MUTE = 0, // don't ever actually set the volume to this (as a matter of character policy)
+  MUTE = 0, // WireOS: allowed via Xiaozhi set_volume 0% / "mute" (stock avoided this for character policy)
   MIN = 1,
   MEDLOW = 2,
   MED = 3,
