@@ -75,6 +75,9 @@ private:
     // themselves create too much noise for beat detection to continue
     // running during the behavior.
     bool listeningForBeats = false;
+
+    // WireOS: voice "dance" with no mic music — use fixed tempo, never cancel on beat-lost.
+    bool freeDanceMode = false;
     
     // If true, then we should play the getout animation if we quit the behavior due to "losing" the beat
     bool playGetoutIfBeatLost = false;

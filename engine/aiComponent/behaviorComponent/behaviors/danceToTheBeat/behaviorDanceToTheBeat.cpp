@@ -45,6 +45,9 @@ namespace {
   // commands are sent to the anim process early by this
   // amount to account for messaging/tick latency/timing.
   const float kLatencyCorrectionTime_sec = 0.050f;
+
+  // Voice free-dance (no mic beat): fixed metronome tempo.
+  const float kFreeDanceTempo_bpm = 120.f;
   
   const char* kUseBackpackLights_key = "useBackpackLights";
   const char* kBackpackAnim_key  = "backpackAnim";
@@ -213,22 +216,20 @@ void BehaviorDanceToTheBeat::OnBehaviorDeactivated()
 void BehaviorDanceToTheBeat::TransitionToDancing()
 {
   const auto& beatDetector = GetBEI().GetBeatDetectorComponent();
-  
-  // Double check that a beat is still detected. If no beat is detected, do not queue a dance animation. This will cause
-  // the behavior to cancel itself in Update(). Note: We cannot cancel the behavior here since unit tests disallow
-  // cancelling a behavior on the same tick it was activated.
-  if (!beatDetector.IsBeatDetected()) {
-    PRINT_NAMED_WARNING("BehaviorDanceToTheBeat.TransitionToDancing.NoBeat",
-                        "Beat no longer detected - not queuing any dance animations");
-    _dVars.nextBeatTime_sec = -1.f;
-    _dVars.beatPeriod_sec = -1.f;
-    _dVars.nextAnimTriggerTime_sec = -1.f;
-    return;
+  const auto now_sec = static_cast<float>(Util::Time::UniversalTime::GetCurrentTimeInSeconds());
+
+  if (beatDetector.IsBeatDetected()) {
+    _dVars.freeDanceMode = false;
+    _dVars.nextBeatTime_sec = beatDetector.GetNextBeatTime_sec();
+    _dVars.beatPeriod_sec = 60.f / beatDetector.GetCurrTempo_bpm();
+  } else {
+    // WireOS Phase 1: voice/Xiaozhi "dance" with no music — keep choreography on a fixed tempo.
+    _dVars.freeDanceMode = true;
+    _dVars.beatPeriod_sec = 60.f / kFreeDanceTempo_bpm;
+    _dVars.nextBeatTime_sec = now_sec + _dVars.beatPeriod_sec;
+    PRINT_CH_INFO("Behaviors", "BehaviorDanceToTheBeat.TransitionToDancing.FreeDance",
+                  "No mic beat — free-dance at %.0f BPM", kFreeDanceTempo_bpm);
   }
-  
-  // grab the next beat time here and wait to play the anim until the appropriate time
-  _dVars.nextBeatTime_sec = beatDetector.GetNextBeatTime_sec();
-  _dVars.beatPeriod_sec = 60.f / beatDetector.GetCurrTempo_bpm();
 
   // Kick off the dancing animations by setting the next trigger time.
   SetNextAnimTriggerTime();
@@ -239,8 +240,10 @@ void BehaviorDanceToTheBeat::WhileDancing()
 {
   // If we are currently listening for beats, double check that a beat
   // is still detected. If not, we should bail out of the behavior.
+  // Free-dance (no music) never cancels for a missing mic beat.
   const auto& beatDetector = GetBEI().GetBeatDetectorComponent();
-  if (_dVars.listeningForBeats &&
+  if (!_dVars.freeDanceMode &&
+      _dVars.listeningForBeats &&
       !beatDetector.IsBeatDetected()) {
     PRINT_NAMED_WARNING("BehaviorDanceToTheBeat.WhileDancing.BeatNoLongerDetected",
                         "Cancelling behavior since we are currently listening for beats "
@@ -285,8 +288,9 @@ void BehaviorDanceToTheBeat::PlayNextDanceAnim()
   // Time to play the next animation in the queue
   DEV_ASSERT(!_dVars.danceAnims.empty(), "BehaviorDanceToTheBeat.PlayNextDanceAnim.NoDanceSessions");
   
-  SetListeningForBeats(_dVars.danceAnims.front().CanListenForBeats());
-  _dVars.playGetoutIfBeatLost = _dVars.danceAnims.front().PlayGetoutIfInterrupted();
+  // Free-dance: never re-open mic beat listening (would cancel when no music).
+  SetListeningForBeats(!_dVars.freeDanceMode && _dVars.danceAnims.front().CanListenForBeats());
+  _dVars.playGetoutIfBeatLost = !_dVars.freeDanceMode && _dVars.danceAnims.front().PlayGetoutIfInterrupted();
   auto* animAction = new PlayAnimationAction(_dVars.danceAnims.front().GetAnimName());
   _dVars.danceAnims.pop_front();
   

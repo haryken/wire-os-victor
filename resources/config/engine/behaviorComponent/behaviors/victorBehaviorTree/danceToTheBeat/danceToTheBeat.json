@@ -1,9 +1,13 @@
 {
   "behaviorClass": "DispatcherRandom",
   "behaviorID": "DanceToTheBeat",
-  
+
+  // WireOS Phase 1 free-dance: voice path activates this without a mic beat.
+  // Ambient music path still gates via DanceToTheBeatCoordinator::IsBeatDetected
+  // before delegating here — do not re-require BeatDetected on this dispatcher.
   "wantsToBeActivatedCondition": {
-    "conditionType": "BeatDetected"
+    "conditionType": "OffTreadsState",
+    "targetState": "OnTreads"
   },
   
   "associatedActiveFeature" : "DanceToTheBeat",

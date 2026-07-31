@@ -2,7 +2,7 @@
   "behaviorClass": "DispatcherQueue",
   "behaviorID": "DanceToTheBeatVoiceCommand",
   
-  "associatedActiveFeature" : "ListeningForBeats",
+  "associatedActiveFeature" : "DanceToTheBeat",
   
   "wantsToBeActivatedCondition": {
     "conditionType": "OffTreadsState",
@@ -14,8 +14,6 @@
   ],
 
   "behaviors" : [
-    "DriveOffChargerStraight",
-    "ListenForBeatsVoiceCommand",
     "DanceToTheBeat"
   ],
   
