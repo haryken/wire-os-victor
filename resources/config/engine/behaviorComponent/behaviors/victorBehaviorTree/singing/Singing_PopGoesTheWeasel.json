@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_PopGoesTheWeasel",
+  "audioSwitchGroup": "Cozmo_Sings_100Bpm",
+  "audioSwitch": "Cozmo_Sings_Pop_Goes_The_Weasel"
+}

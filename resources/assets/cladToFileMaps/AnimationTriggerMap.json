@@ -57,7 +57,7 @@
   },
   {
     "CladEvent": "AlexaSignOut",
-    "AnimName" : "ag_blackjack_victorlose"
+    "AnimName": "ag_blackjack_victorlose"
   },
   {
     "CladEvent": "AlexaSpeak2Listen",
@@ -94,114 +94,114 @@
   {
     "CladEvent": "AlreadyAtFace",
     "AnimName": "ag_movement_comehere_alreadyhere"
-  },  
+  },
   {
     "CladEvent": "AudioOnlyHuh",
     "AnimName": "ag_explorer_huh"
   },
   {
     "CladEvent": "BlackJack_Deal",
-    "AnimName" : "ag_blackjack_deal"
+    "AnimName": "ag_blackjack_deal"
   },
   {
     "CladEvent": "BlackJack_GoodLuck",
-    "AnimName" : "ag_blackjack_goodluck"
+    "AnimName": "ag_blackjack_goodluck"
   },
   {
     "CladEvent": "BlackJack_GetIn",
-    "AnimName" : "ag_blackjack_getin"
+    "AnimName": "ag_blackjack_getin"
   },
   {
     "CladEvent": "BlackJack_Idle",
-    "AnimName" : "ag_blackjack_idle"
+    "AnimName": "ag_blackjack_idle"
   },
   {
     "CladEvent": "BlackJack_Quit",
-    "AnimName" : "ag_blackjack_quit"
+    "AnimName": "ag_blackjack_quit"
   },
   {
     "CladEvent": "BlackJack_Response",
-    "AnimName" : "ag_blackjack_response"
+    "AnimName": "ag_blackjack_response"
   },
   {
     "CladEvent": "BlackJack_RtpIdle",
-    "AnimName" : "ag_rtp_blackjack_idle"
+    "AnimName": "ag_rtp_blackjack_idle"
   },
   {
     "CladEvent": "BlackJack_RtpPlayerNo",
-    "AnimName" : "ag_rtp_blackjack_playerno"
+    "AnimName": "ag_rtp_blackjack_playerno"
   },
   {
     "CladEvent": "BlackJack_RtpPlayerYes",
-    "AnimName" : "ag_rtp_blackjack_playeryes"
+    "AnimName": "ag_rtp_blackjack_playeryes"
   },
   {
     "CladEvent": "BlackJack_RtpRequest",
-    "AnimName" : "ag_rtp_blackjack_request"
+    "AnimName": "ag_rtp_blackjack_request"
   },
   {
     "CladEvent": "BlackJack_RtpTimeOut",
-    "AnimName" : "ag_rtp_blackjack_timeout"
+    "AnimName": "ag_rtp_blackjack_timeout"
   },
   {
     "CladEvent": "BlackJack_SpeechGetIn",
-    "AnimName" : "ag_blackjack_speech_getin"
+    "AnimName": "ag_blackjack_speech_getin"
   },
   {
     "CladEvent": "BlackJack_SpeechShortStatement",
-    "AnimName" : "ag_blackjack_speech_short_statement"
+    "AnimName": "ag_blackjack_speech_short_statement"
   },
   {
     "CladEvent": "BlackJack_Spread",
-    "AnimName" : "ag_blackjack_spread"
+    "AnimName": "ag_blackjack_spread"
   },
   {
     "CladEvent": "BlackJack_Swipe",
-    "AnimName" : "ag_blackjack_swipe"
+    "AnimName": "ag_blackjack_swipe"
   },
   {
     "CladEvent": "BlackJack_VictorBlackJackLose",
-    "AnimName" : "ag_blackjack_victorblackjacklose"
+    "AnimName": "ag_blackjack_victorblackjacklose"
   },
   {
     "CladEvent": "BlackJack_VictorBlackJackWin",
-    "AnimName" : "ag_blackjack_victorblackjackwin"
+    "AnimName": "ag_blackjack_victorblackjackwin"
   },
   {
     "CladEvent": "BlackJack_VictorBust",
-    "AnimName" : "ag_blackjack_victorbust"
+    "AnimName": "ag_blackjack_victorbust"
   },
   {
     "CladEvent": "BlackJack_VictorLose",
-    "AnimName" : "ag_blackjack_victorlose"
+    "AnimName": "ag_blackjack_victorlose"
   },
   {
     "CladEvent": "BlackJack_VictorPush",
-    "AnimName" : "ag_blackjack_victorpush"
+    "AnimName": "ag_blackjack_victorpush"
   },
   {
     "CladEvent": "BlackJack_VictorWin",
-    "AnimName" : "ag_blackjack_victorwin"
+    "AnimName": "ag_blackjack_victorwin"
   },
   {
     "CladEvent": "ConnectToCubeFailure",
-    "AnimName":  "ag_cubeconnection_connectionfailure"
+    "AnimName": "ag_cubeconnection_connectionfailure"
   },
   {
     "CladEvent": "ConnectToCubeGetIn",
-    "AnimName":  "ag_cubeconnection_getin"
+    "AnimName": "ag_cubeconnection_getin"
   },
   {
     "CladEvent": "ConnectToCubeLoop",
-    "AnimName":  "ag_cubeconnection_loop"
+    "AnimName": "ag_cubeconnection_loop"
   },
   {
     "CladEvent": "ConnectToCubeLostConnection",
-    "AnimName":  "ag_cubeconnection_connectionlost"
+    "AnimName": "ag_cubeconnection_connectionlost"
   },
   {
     "CladEvent": "ConnectToCubeSuccess",
-    "AnimName":  "ag_cubeconnection_connectionsuccess"
+    "AnimName": "ag_cubeconnection_connectionsuccess"
   },
   {
     "CladEvent": "ChargerDockingAlreadyHere",
@@ -432,7 +432,7 @@
     "AnimName": "ag_dancebeat_listening"
   },
   {
-    "CladEvent" : "DanceBeatNoBeatDetected",
+    "CladEvent": "DanceBeatNoBeatDetected",
     "AnimName": "ag_dancebeat_nobeatdetected"
   },
   {
@@ -652,24 +652,24 @@
     "AnimName": "ag_explorer_scan_short"
   },
   {
-   "CladEvent": "ExploringReactToHandGetIn",
-   "AnimName": "ag_handdetection_getin"
+    "CladEvent": "ExploringReactToHandGetIn",
+    "AnimName": "ag_handdetection_getin"
   },
   {
-   "CladEvent": "ExploringReactToHandDrive",
-   "AnimName": "ag_handdetection_drive_loop"
+    "CladEvent": "ExploringReactToHandDrive",
+    "AnimName": "ag_handdetection_drive_loop"
   },
   {
-   "CladEvent": "ExploringReactToHandLift",
-   "AnimName": "ag_handdetection_lift"
+    "CladEvent": "ExploringReactToHandLift",
+    "AnimName": "ag_handdetection_lift"
   },
   {
     "CladEvent": "ExploringReactToHandReaction",
     "AnimName": "ag_handdetection_reaction"
   },
   {
-   "CladEvent": "ExploringReactToHandGetOut",
-   "AnimName": "ag_handdetection_getout"
+    "CladEvent": "ExploringReactToHandGetOut",
+    "AnimName": "ag_handdetection_getout"
   },
   {
     "CladEvent": "ExploringScanToLeft",
@@ -746,7 +746,7 @@
   {
     "CladEvent": "FlipDownFromBack",
     "AnimName": "ag_reacttocliff_turtleroll_01"
-  },  
+  },
   {
     "CladEvent": "FoundFace",
     "AnimName": "ag_movement_reacttoface"
@@ -869,27 +869,27 @@
   },
   {
     "CladEvent": "MeetVictorGetIn",
-    "AnimName" : "ag_meetvictor_getin"
+    "AnimName": "ag_meetvictor_getin"
   },
   {
     "CladEvent": "MeetVictorLookFace",
-    "AnimName" : "ag_meetvictor_lookface"
+    "AnimName": "ag_meetvictor_lookface"
   },
   {
     "CladEvent": "MeetVictorSayName",
-    "AnimName" : "ag_meetvictor_sayname_01"
+    "AnimName": "ag_meetvictor_sayname_01"
   },
   {
     "CladEvent": "MeetVictorSayNameAgain",
-    "AnimName" : "ag_meetvictor_sayname_02"
+    "AnimName": "ag_meetvictor_sayname_02"
   },
   {
     "CladEvent": "MeetVictorSawWrongFace",
-    "AnimName" : "ag_meetvictor_youarebob_01"
+    "AnimName": "ag_meetvictor_youarebob_01"
   },
   {
     "CladEvent": "MeetVictorLookFaceInterrupt",
-    "AnimName" : "ag_meetvictor_interrupt"
+    "AnimName": "ag_meetvictor_interrupt"
   },
   {
     "CladEvent": "MeetVictorConfusion",
@@ -901,16 +901,16 @@
   },
   {
     "CladEvent": "DEPRECATED_NamedFaceInitialGreeting",
-    "AnimName" : "ag_greeting_hello"
+    "AnimName": "ag_greeting_hello"
   },
   {
     "CladEvent": "NeutralFace",
-    "AnimName" : "ag_neutral_face"
+    "AnimName": "ag_neutral_face"
   },
   {
     "CladEvent": "NothingToDoBoredIdle",
     "AnimName": "ag_hiking_lookaround"
-  },  
+  },
   {
     "CladEvent": "OnboardingComeHere",
     "AnimName": "ag_onboarding_drive_to_face"
@@ -994,11 +994,11 @@
   {
     "CladEvent": "OnboardingWakeWordGetIn",
     "AnimName": "ag_onboarding_wakeword_getin_01"
-  },  
+  },
   {
     "CladEvent": "OnboardingWakeWordSuccess",
     "AnimName": "ag_onboarding_wakeword_success"
-  },  
+  },
   {
     "CladEvent": "PettingLevel1",
     "AnimName": "ag_petting_lvl1"
@@ -1040,48 +1040,48 @@
     "AnimName": "ag_petting_lvl4_getout"
   },
   {
-    "CladEvent":"PickupCubePreperation",
+    "CladEvent": "PickupCubePreperation",
     "AnimName": "ag_rollcube_initial"
   },
   {
-    "CladEvent":"PickupCubeRetry",
+    "CladEvent": "PickupCubeRetry",
     "AnimName": "ag_rollcube_retry"
   },
   {
-    "CladEvent":"PickupCubeSuccess",
+    "CladEvent": "PickupCubeSuccess",
     "AnimName": "ag_pickupcube_success"
   },
   {
-    "CladEvent":"PetDetectionDog",
+    "CladEvent": "PetDetectionDog",
     "AnimName": "ag_petdetection_reaction_dog"
   },
   {
-    "CladEvent":"PetDetectionCat",
+    "CladEvent": "PetDetectionCat",
     "AnimName": "ag_petdetection_reaction_cat"
   },
   {
-    "CladEvent":"PlaceCubeByChargerFail",
+    "CladEvent": "PlaceCubeByChargerFail",
     "AnimName": "ag_reacttoblock_dropfail"
   },
   {
-    "CladEvent":"PlaceCubeByChargerReactToCharger",
+    "CladEvent": "PlaceCubeByChargerReactToCharger",
     "AnimName": "ag_reacttoblock_reacttocharger"
   },
   {
-    "CladEvent":"PlaceCubeByChargerSuccess",
+    "CladEvent": "PlaceCubeByChargerSuccess",
     "AnimName": "ag_reacttoblock_dropsuccess"
   },
   {
     "CladEvent": "PlanningGetIn",
-    "AnimName" : "ag_explorer_planning_getin"
+    "AnimName": "ag_explorer_planning_getin"
   },
   {
     "CladEvent": "PlanningLoop",
-    "AnimName" : "ag_explorer_planning"
+    "AnimName": "ag_explorer_planning"
   },
   {
     "CladEvent": "PlanningGetOut",
-    "AnimName" : "ag_explorer_planning_getout"
+    "AnimName": "ag_explorer_planning_getout"
   },
   {
     "CladEvent": "PopAWheelieInitial",
@@ -1222,7 +1222,7 @@
   {
     "CladEvent": "DEPRECATED_SearchForFace_FoundFace",
     "AnimName": "ag_vc_reaction_nofaceheardyou_getout"
-  },  
+  },
   {
     "CladEvent": "BumpObjectSlowGetIn",
     "AnimName": "ag_slowbump_getin"
@@ -1327,7 +1327,6 @@
     "CladEvent": "TakeAPictureCapture",
     "AnimName": "ag_takepicture_capture"
   },
-
   {
     "CladEvent": "TextToSpeechGetIn",
     "AnimName": "ag_texttospeech_getin_01"
@@ -1696,7 +1695,6 @@
     "CladEvent": "Feedback_BeQuiet",
     "AnimName": "ag_feedback_bequiet"
   },
-
   {
     "CladEvent": "Feedback_Apology",
     "AnimName": "ag_feedback_apology"
@@ -1709,7 +1707,6 @@
     "CladEvent": "Feedback_MeanWords",
     "AnimName": "ag_feedback_meanwords"
   },
-
   {
     "CladEvent": "ReactToGoodBye",
     "AnimName": "ag_greeting_goodbye"
@@ -1908,47 +1905,47 @@
   },
   {
     "CladEvent": "GazingLookAtFacesGetInLeft",
-    "AnimName" : "ag_gazing_lookatfaces_getin_left"
+    "AnimName": "ag_gazing_lookatfaces_getin_left"
   },
   {
     "CladEvent": "GazingLookAtFacesGetInRight",
-    "AnimName" : "ag_gazing_lookatfaces_getin_right"
+    "AnimName": "ag_gazing_lookatfaces_getin_right"
   },
   {
     "CladEvent": "GazingLookAtFacesTurnLeft",
-    "AnimName" : "ag_gazing_lookatfaces_turn_left"
+    "AnimName": "ag_gazing_lookatfaces_turn_left"
   },
   {
     "CladEvent": "GazingLookAtFacesTurnRight",
-    "AnimName" : "ag_gazing_lookatfaces_turn_right"
+    "AnimName": "ag_gazing_lookatfaces_turn_right"
   },
   {
     "CladEvent": "GazingLookAtSurfacesGetInLeft",
-    "AnimName" : "ag_gazing_lookatsurfaces_getin_left"
+    "AnimName": "ag_gazing_lookatsurfaces_getin_left"
   },
   {
     "CladEvent": "GazingLookAtSurfacesGetInRight",
-    "AnimName" : "ag_gazing_lookatsurfaces_getin_right"
+    "AnimName": "ag_gazing_lookatsurfaces_getin_right"
   },
   {
     "CladEvent": "GazingLookAtSurfaceReaction",
-    "AnimName" : "ag_gazing_lookatsurface_reaction"
+    "AnimName": "ag_gazing_lookatsurface_reaction"
   },
   {
     "CladEvent": "GazingLookAtSurfaceTurnLeft",
-    "AnimName" : "ag_gazing_lookatsurface_turn_left"
+    "AnimName": "ag_gazing_lookatsurface_turn_left"
   },
   {
     "CladEvent": "GazingLookAtSurfacesTurnRight",
-    "AnimName" : "ag_gazing_lookatsurfaces_turn_right"
+    "AnimName": "ag_gazing_lookatsurfaces_turn_right"
   },
   {
     "CladEvent": "GazingLookAtVectorReaction",
-    "AnimName" : "ag_gazing_lookatvector_reaction"
+    "AnimName": "ag_gazing_lookatvector_reaction"
   },
   {
     "CladEvent": "GreetAfterLongTime",
-    "AnimName" : "ag_greeting_imhome"
+    "AnimName": "ag_greeting_imhome"
   },
   {
     "CladEvent": "ComeHereStart",
@@ -2089,5 +2086,25 @@
   {
     "CladEvent": "IntentionalPerformance",
     "AnimName": "ag_iperformance"
+  },
+  {
+    "CladEvent": "DEPRECATED_Singing_80bpm",
+    "AnimName": "ag_cozmosings_80bpm"
+  },
+  {
+    "CladEvent": "DEPRECATED_Singing_100bpm",
+    "AnimName": "ag_cozmosings_100bpm"
+  },
+  {
+    "CladEvent": "DEPRECATED_Singing_120bpm",
+    "AnimName": "ag_cozmosings_120bpm"
+  },
+  {
+    "CladEvent": "DEPRECATED_Singing_GetIn",
+    "AnimName": "ag_cozmosings_getin"
+  },
+  {
+    "CladEvent": "DEPRECATED_Singing_GetOut",
+    "AnimName": "ag_cozmosings_getout"
   }
 ]

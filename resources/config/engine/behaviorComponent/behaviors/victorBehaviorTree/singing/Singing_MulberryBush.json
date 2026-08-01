@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_MulberryBush",
+  "audioSwitchGroup": "Cozmo_Sings_80Bpm",
+  "audioSwitch": "Cozmo_Sings_Mulberry_Bush"
+}

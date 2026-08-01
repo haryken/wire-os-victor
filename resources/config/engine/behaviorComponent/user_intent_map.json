@@ -90,6 +90,11 @@
       "user_intent": "imperative_dance"
     },
     {
+      "cloud_intent": "intent_imperative_sing",
+      "app_intent": "intent_imperative_sing",
+      "user_intent": "imperative_sing"
+    },
+    {
       "cloud_intent": "intent_imperative_affirmative",
       "user_intent": "imperative_affirmative"
     },

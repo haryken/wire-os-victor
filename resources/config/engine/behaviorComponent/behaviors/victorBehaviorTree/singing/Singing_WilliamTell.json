@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_WilliamTell",
+  "audioSwitchGroup": "Cozmo_Sings_80Bpm",
+  "audioSwitch": "Cozmo_Sings_William_Tell"
+}

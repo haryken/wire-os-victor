@@ -239,6 +239,7 @@ enum uint_8 BehaviorClass {
   // sleeping
   SleepCycle,
   Sleeping,
+  Singing,
 
   // timer
   AdvanceClock,

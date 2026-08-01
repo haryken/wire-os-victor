@@ -1,0 +1,167 @@
+{
+  "behaviorID": "SingingVoiceCommand",
+  "behaviorClass": "DispatcherRandom",
+  "respondToUserIntents": [
+    {
+      "type": "imperative_sing"
+    }
+  ],
+  "behaviors": [
+    {
+      "behavior": "Singing_AbaDaba",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_BeautifulDreamer",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_Beethovens5th",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_Bingo",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_BuffaloGals",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_Camptown",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_CanCan1",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_CanCan2",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_DannyBoy",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_EntryOfTheGladiators",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_FarmerInTheDell",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_FrereJacques",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_HelloMyBaby",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_ItsyBitsySpider",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_LaPaloma",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_LondonBridge",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_MaryHadALittleLamb",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_MountainKing",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_MuffinMan",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_MulberryBush",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_MussIDenn",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_OdeToJoy",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_PachebelCanon",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_PopGoesTheWeasel",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_RowYourBoat",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_Sakura",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_SilveryMoon",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_TaRaRaBoom",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_TakeMeOutToTheBallgame",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_TisketTasket",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_Toccata",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_TurkeyInTheStraw",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_TwinkleTwinkle",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_VivaldiSpring",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_WaterMusic",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_WildAboutHarry",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_WilliamTell",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_YankeeDoodle",
+      "weight": 1.0
+    },
+    {
+      "behavior": "Singing_YellowRose",
+      "weight": 1.0
+    }
+  ]
+}

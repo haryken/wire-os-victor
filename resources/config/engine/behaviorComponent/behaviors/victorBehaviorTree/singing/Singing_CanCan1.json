@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_CanCan1",
+  "audioSwitchGroup": "Cozmo_Sings_100Bpm",
+  "audioSwitch": "Cozmo_Sings_Can_Can_1"
+}

@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_EntryOfTheGladiators",
+  "audioSwitchGroup": "Cozmo_Sings_120Bpm",
+  "audioSwitch": "Cozmo_Sings_Entry_Of_The_Gladiators"
+}

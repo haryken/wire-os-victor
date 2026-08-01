@@ -23,6 +23,9 @@
     "PopAWheelieVoiceCommand",
     "RollCubeVoiceCommand",
     "DoATrickVoiceCommand",
+    // Sing must beat ReactToObstacle like keepaway; otherwise prox "obstacle"
+    // ForceClears imperative_sing (~90 ticks) before VoiceFeatures runs.
+    "SingingVoiceCommand",
     "ReactToObstacle",
     "SingletonPounceDispatcher",
     "VoiceFeatures",

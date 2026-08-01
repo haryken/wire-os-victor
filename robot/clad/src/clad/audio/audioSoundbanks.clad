@@ -6,6 +6,7 @@ namespace SoundBank {
 
 enum uint_32 BankType
 {
+  Cozmo_Singing = 3988466513,
   Chewie_App = 652415938,
   Chewie_Dev = 804253094,
   Chewie_Global_Data = 3599655703,

@@ -1,0 +1,6 @@
+{
+  "behaviorClass": "Singing",
+  "behaviorID": "Singing_DannyBoy",
+  "audioSwitchGroup": "Cozmo_Sings_80Bpm",
+  "audioSwitch": "Cozmo_Sings_Danny_Boy"
+}
