@@ -16,6 +16,15 @@
         "active_feature": "MovementForward",
         "disable_wakeword_turn": true
       }
+    },
+    {
+      "cloud_intent": "intent_play_firetruck",
+      "response": {
+        "anim_group": "ag_voice_firetruck",
+        "emotion_event": "RespondToShortVoiceCommand",
+        "active_feature": "BasicVoiceCommand",
+        "disable_wakeword_turn": true
+      }
     }
   ],
 
