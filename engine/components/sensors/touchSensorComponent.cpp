@@ -27,6 +27,9 @@
 
 #include "util/logging/DAS.h"
 
+#include <algorithm>
+#include <cctype>
+
 #define LOG_CHANNEL "TouchSensor"
 
 namespace Anki {
@@ -36,6 +39,41 @@ namespace {
   const std::string kLogDirectory = "touchSensor";
   
   const std::string kWebVizTouchSensorModuleName = "touch";
+
+  // Wired web UI writes this; missing file keeps stock touch enabled.
+  const char* const kWireOsTouchEnabledPath = "/data/wired/mods/Petting/touch_enabled";
+  const float kWireOsTouchEnabledCacheSec = 1.0f;
+
+  bool IsWireOsTouchSensorEnabled()
+  {
+    static float sLastCheckTime = -1000.f;
+    static bool sEnabled = true;
+
+    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+    if ((now - sLastCheckTime) < kWireOsTouchEnabledCacheSec) {
+      return sEnabled;
+    }
+    sLastCheckTime = now;
+
+    if (!Util::FileUtils::FileExists(kWireOsTouchEnabledPath)) {
+      sEnabled = true;
+      return sEnabled;
+    }
+
+    std::string contents = Util::FileUtils::ReadFile(kWireOsTouchEnabledPath);
+    contents.erase(contents.begin(),
+                   std::find_if(contents.begin(), contents.end(),
+                                [](unsigned char c) { return !std::isspace(c); }));
+    contents.erase(std::find_if(contents.rbegin(), contents.rend(),
+                                [](unsigned char c) { return !std::isspace(c); }).base(),
+                   contents.end());
+    std::transform(contents.begin(), contents.end(), contents.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    sEnabled = !(contents == "false" || contents == "0" || contents == "off" ||
+                 contents == "no" || contents == "disabled");
+    return sEnabled;
+  }
   
   // Baseline calibration constants:
   // -- maximum number of readings to wait for until we determine calibrated
@@ -437,7 +475,19 @@ void TouchSensorComponent::NotifyOfRobotStateInternal(const RobotState& msg)
   //
   // DVT hardware => disabled
   // PVT hardware => enabled
-  if(!_enabled) {
+  // WireOS web "Tắt hết cảm biến" also disables all backpack-touch consumers.
+  const bool wireOsTouchEnabled = IsWireOsTouchSensorEnabled();
+  if(!_enabled || !wireOsTouchEnabled) {
+    if(_confirmedPressState) {
+      _confirmedPressState = false;
+      _isPressed = false;
+      _counterPressState = 0;
+      if(_robot != nullptr) {
+        _robot->Broadcast(
+          ExternalInterface::MessageEngineToGame(
+            ExternalInterface::TouchButtonEvent(false)));
+      }
+    }
     return;
   }
   
@@ -678,7 +728,7 @@ bool TouchSensorComponent::ProcessWithDynamicThreshold(const int baseline, const
 
 bool TouchSensorComponent::GetIsPressed() const
 {
-  return _confirmedPressState;
+  return _confirmedPressState && IsWireOsTouchSensorEnabled();
 }
 
 int TouchSensorComponent::GetDetectLevelOffset() const

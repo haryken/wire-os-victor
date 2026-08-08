@@ -34,7 +34,10 @@
 
 #include "clad/audio/audioEventTypes.h"
 #include "clad/types/behaviorComponent/behaviorStats.h"
+#include "util/fileUtils/fileUtils.h"
 
+#include <algorithm>
+#include <cctype>
 #include <vector>
 #include <memory>
 #include <limits>
@@ -58,6 +61,41 @@ namespace {
   const char* const kTimeTilBlissGetoutKey = "timeTilBlissGetout";
   const char* const kTimeTilNonBlissGetoutKey = "timeTilNonBlissGetout";
   const char* const kNumPetsToAdvanceBlissKey = "numPetsToAdvanceBliss";
+
+  // Wired web UI (:80/:8080) writes this; missing file keeps stock petting enabled.
+  const char* const kPettingEnabledPath = "/data/wired/mods/Petting/enabled";
+  const float kPettingEnabledCacheSec = 1.0f;
+
+  bool IsWireOsPettingEnabled()
+  {
+    static float sLastCheckTime = -1000.f;
+    static bool sEnabled = true;
+
+    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+    if ((now - sLastCheckTime) < kPettingEnabledCacheSec) {
+      return sEnabled;
+    }
+    sLastCheckTime = now;
+
+    if (!Util::FileUtils::FileExists(kPettingEnabledPath)) {
+      sEnabled = true;
+      return sEnabled;
+    }
+
+    std::string contents = Util::FileUtils::ReadFile(kPettingEnabledPath);
+    contents.erase(contents.begin(),
+                   std::find_if(contents.begin(), contents.end(),
+                                [](unsigned char c) { return !std::isspace(c); }));
+    contents.erase(std::find_if(contents.rbegin(), contents.rend(),
+                                [](unsigned char c) { return !std::isspace(c); }).base(),
+                   contents.end());
+    std::transform(contents.begin(), contents.end(), contents.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    sEnabled = !(contents == "false" || contents == "0" || contents == "off" ||
+                 contents == "no" || contents == "disabled");
+    return sEnabled;
+  }
   
 }
   
@@ -169,7 +207,7 @@ void BehaviorReactToTouchPetting::AlwaysHandleInScope(const EngineToGameEvent& e
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool BehaviorReactToTouchPetting::WantsToBeActivatedBehavior() const
 {
-  return _isPressed;
+  return _isPressed && IsWireOsPettingEnabled();
 }
 
 
@@ -244,6 +282,15 @@ void BehaviorReactToTouchPetting::PlayBlissLoopAnimation()
 void BehaviorReactToTouchPetting::BehaviorUpdate()
 {
   if(!IsActivated()){
+    return;
+  }
+
+  // WireOS web toggle: stop mid-session if petting was disabled while active
+  if(!IsWireOsPettingEnabled()) {
+    CancelDelegates();
+    ResetTouchState();
+    GetBEI().GetBackpackLightComponent().ClearAllBackpackLightConfigs();
+    CancelSelf();
     return;
   }
   
