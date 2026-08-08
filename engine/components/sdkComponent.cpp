@@ -425,7 +425,10 @@ void SDKComponent::HandleProtoMessage(const AnkiEvent<external_interface::Gatewa
     // to prevent enabling of unnecessary modes that may have performance impact.
     // The modes are automatically removed when the behavior is deactivated.
     // Except for Viz since the SDK still wants to receive images while the robot is
-    // doing his normal things
+    // doing his normal things.
+    // WireOS: also allow Markers + Faces without SDK control so the :8080
+    // "Vector Freetime" watch tab can overlay cubes/faces during freeplay
+    // (same rationale as Viz / EnableImageStreaming).
     #define SEND_FORBIDDEN(RESPONSE_TYPE) {                                     \
         ResponseStatus* status = new ResponseStatus(ResponseStatus::FORBIDDEN); \
         auto* msg = new RESPONSE_TYPE();                                        \
@@ -435,48 +438,28 @@ void SDKComponent::HandleProtoMessage(const AnkiEvent<external_interface::Gatewa
 
     case external_interface::GatewayWrapperTag::kEnableMarkerDetectionRequest:
       {
-        if(_sdkBehaviorActivated)
-        {
-          const auto& enable = event.GetData().enable_marker_detection_request().enable();
-          SubscribeToVisionMode(enable, VisionMode::Markers);
-          SubscribeToVisionMode(enable, VisionMode::Markers_FullFrame);
-        }
-        else
-        {
-          SEND_FORBIDDEN(EnableMarkerDetectionResponse);
-        }
+        const auto& enable = event.GetData().enable_marker_detection_request().enable();
+        SubscribeToVisionMode(enable, VisionMode::Markers);
+        SubscribeToVisionMode(enable, VisionMode::Markers_FullFrame);
       }
       break;
 
     case external_interface::GatewayWrapperTag::kEnableFaceDetectionRequest:
       {
-        if(_sdkBehaviorActivated)
-        {
-          const auto& msg = event.GetData().enable_face_detection_request();
-          SubscribeToVisionMode(msg.enable(), VisionMode::Faces);
-          SubscribeToVisionMode(msg.enable_smile_detection(), VisionMode::Faces_Smile);
-          SubscribeToVisionMode(msg.enable_expression_estimation(), VisionMode::Faces_Expression);
-          SubscribeToVisionMode(msg.enable_blink_detection(), VisionMode::Faces_Blink);
-          SubscribeToVisionMode(msg.enable_gaze_detection(), VisionMode::Faces_Gaze);
-        }
-        else
-        {
-          SEND_FORBIDDEN(EnableFaceDetectionResponse);
-        }
+        const auto& msg = event.GetData().enable_face_detection_request();
+        SubscribeToVisionMode(msg.enable(), VisionMode::Faces);
+        SubscribeToVisionMode(msg.enable_smile_detection(), VisionMode::Faces_Smile);
+        SubscribeToVisionMode(msg.enable_expression_estimation(), VisionMode::Faces_Expression);
+        SubscribeToVisionMode(msg.enable_blink_detection(), VisionMode::Faces_Blink);
+        SubscribeToVisionMode(msg.enable_gaze_detection(), VisionMode::Faces_Gaze);
       }
       break;
 
     case external_interface::GatewayWrapperTag::kEnableMotionDetectionRequest:
       {
-        if(_sdkBehaviorActivated)
-        {
-          const auto& enable = event.GetData().enable_motion_detection_request().enable();
-          SubscribeToVisionMode(enable, VisionMode::Motion);
-        }
-        else
-        {
-          SEND_FORBIDDEN(EnableMotionDetectionResponse);
-        }
+        // WireOS Freetime: allow without SDK control (same as Markers/Faces).
+        const auto& enable = event.GetData().enable_motion_detection_request().enable();
+        SubscribeToVisionMode(enable, VisionMode::Motion);
       }
       break;
 
@@ -699,19 +682,26 @@ void SDKComponent::SDKBehaviorActivation(bool enabled)
   _sdkBehaviorActivated = enabled;
   DispatchSDKActivationResult(_sdkBehaviorActivated, _sdkControlConnId);
 
-  // If sdk behavior is being deactivated...
+    // If sdk behavior is being deactivated...
   if(!_sdkBehaviorActivated)
   {
     // ...unsubscribe from MirrorMode. This is to make sure the robot
     // will display eyes when the sdk no longer has control.
     DisableMirrorMode();
 
-    // Remove all other vision modes except for Viz in order
-    // to allow SDK users to still receive images when the SDK does not have
-    // control.
+    // Remove vision modes except Viz + WireOS watch modes (Markers/Faces/Motion)
+    // so Freetime overlays and image streaming keep working after control release.
     VisionModeSet modes;
     modes.InsertAllModes();
     modes.Remove(VisionMode::Viz);
+    modes.Remove(VisionMode::Markers);
+    modes.Remove(VisionMode::Markers_FullFrame);
+    modes.Remove(VisionMode::Faces);
+    modes.Remove(VisionMode::Faces_Smile);
+    modes.Remove(VisionMode::Faces_Expression);
+    modes.Remove(VisionMode::Faces_Blink);
+    modes.Remove(VisionMode::Faces_Gaze);
+    modes.Remove(VisionMode::Motion);
     _robot->GetVisionScheduleMediator().RemoveVisionModeSubscriptions(this, modes.GetSet());
 
     auto* gi = _robot->GetGatewayInterface();
