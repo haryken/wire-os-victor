@@ -39,6 +39,11 @@
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
 #include <list>
 #include <sched.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <cstring>
 
 
 namespace Anki {
@@ -48,6 +53,45 @@ namespace MicData {
 namespace {
   
 #define LOG_CHANNEL "Microphones"
+
+// WireOS Control: when /run/wired/listen_mic exists, tap processed mono mic PCM
+// to /run/wired/mic.sock for wired → phone speaker (robot → human duplex).
+void MaybeSendWiredListenMic(const AudioUtil::AudioSample* mono, uint32_t nSamples)
+{
+  static int fd = -1;
+  static bool haveAddr = false;
+  static sockaddr_un addr{};
+
+  if (mono == nullptr || nSamples == 0) {
+    return;
+  }
+  if (access("/run/wired/listen_mic", F_OK) != 0) {
+    if (fd >= 0) {
+      close(fd);
+      fd = -1;
+    }
+    return;
+  }
+  if (fd < 0) {
+    fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+      return;
+    }
+    const int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) {
+      fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+  }
+  if (!haveAddr) {
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, "/run/wired/mic.sock", sizeof(addr.sun_path) - 1);
+    haveAddr = true;
+  }
+  const ssize_t bytes = static_cast<ssize_t>(nSamples * sizeof(AudioUtil::AudioSample));
+  (void)sendto(fd, mono, static_cast<size_t>(bytes), MSG_DONTWAIT,
+               reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+}
 #define CONSOLE_GROUP "MicData"
 
   CONSOLE_VAR(bool, kMicData_SpeakerNoiseDisablesMics, CONSOLE_GROUP, false);
@@ -362,6 +406,9 @@ void MicDataProcessor::ProcessRawAudio(RobotTimeStamp_t timestamp,
     nextSample.audioBlock.data(),
     robotStatus,
     robotAngle);
+
+  // WireOS: optional live tap of processed mono → wired Control "Nghe robot"
+  MaybeSendWiredListenMic(nextSample.audioBlock.data(), kSamplesPerBlockPerChannel);
 
   // Feed the samples to the beat detector. Optionally either use a raw single channel (the first quarter of the
   // un-interleaved audio block) or the processed audio block
