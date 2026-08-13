@@ -103,6 +103,9 @@ namespace Anki
 
       bool HaveGottenFrame() const { return _imageFrameID > 1; }
 
+      // True while CameraGetFrame is injecting empty-room YUV (broken camera / FakeCamera On).
+      bool IsInjectingFakeFrames() const;
+
     private:
       
       CameraService();

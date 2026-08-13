@@ -23,6 +23,8 @@
 #include "engine/blockWorld/blockWorld.h"
 #include "engine/blockWorld/blockWorldFilter.h"
 #include "engine/faceWorld.h"
+#include "engine/aiComponent/aiWhiteboard.h"
+#include "camera/cameraService.h"
 #include "util/console/consoleInterface.h"
 #include "util/helpers/boundedWhile.h"
 #include "util/logging/DAS.h"
@@ -245,7 +247,14 @@ CustomBEIConditionHandleList BehaviorHighLevelAI::CreateCustomConditions()
             return false;
           }
 
-          const float cooldown_s = GetAIComp<AIWhiteboard>().GetExploringCooldown_s();
+          // Broken-camera (fake YUV) robots never get visual novelty, so the
+          // lifetime-based exploring cooldown grows to 4–5 minutes and they
+          // stay in ObservingOffChargerHeadOnly. Keep the young-robot cadence.
+          float cooldown_s = GetAIComp<AIWhiteboard>().GetExploringCooldown_s();
+          if( CameraService::hasInstance() &&
+              CameraService::getInstance()->IsInjectingFakeFrames() ) {
+            cooldown_s = 10.0f;
+          }
 
           if( _params.lastExploringCooldownPrinted != cooldown_s ) {
             LOG_INFO("BehaviorHighLevelAI.ExploringState.NewCooldown",

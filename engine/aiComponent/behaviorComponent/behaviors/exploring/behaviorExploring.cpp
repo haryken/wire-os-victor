@@ -31,6 +31,7 @@
 #include "engine/navMap/memoryMap/memoryMapTypes.h"
 #include "engine/navMap/memoryMap/data/memoryMapData_ProxObstacle.h"
 #include "engine/utils/robotPointSamplerHelper.h"
+#include "camera/cameraService.h"
 #include "util/console/consoleInterface.h"
 #include "util/logging/DAS.h"
 #include "util/random/randomGenerator.h"
@@ -501,9 +502,11 @@ bool BehaviorExploring::IsCubeNearCharger() const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void BehaviorExploring::SampleAndDrive()
 {
-  // if we don't have a face (can't run the referencing behavior) then we should occasionally search for
-  // faces. Check that here
-  if( ! _iConfig.referenceHumanBehavior->WantsToBeActivated() ) {
+  const bool fakeCam = CameraService::hasInstance() &&
+                       CameraService::getInstance()->IsInjectingFakeFrames();
+
+  // Fake empty-room frames never contain faces. Searching for them stalls driving.
+  if( !fakeCam && ! _iConfig.referenceHumanBehavior->WantsToBeActivated() ) {
     const float currTime_s = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
     if( currTime_s - _dVars.lastSearchForFaceTime_s >= kPeriodToCheckForFaces_s ) {
       TransitionToHumanSearch();
@@ -512,7 +515,7 @@ void BehaviorExploring::SampleAndDrive()
   }
   
   const auto* charger = GetCharger();
-  if (charger != nullptr) {
+  if (charger != nullptr && !fakeCam) {
     // See if we've traveled far enough away from the last pose at which we looked at the charger
     const auto& robotPose = GetBEI().GetRobotInfo().GetPose();
     f32 distance = 0.f;
@@ -691,7 +694,8 @@ std::vector<Pose3d> BehaviorExploring::SampleVisitLocations() const
   // all the logic below works just fine if the charger position is centered directly on the robot.
   // we use that if the charger positions is not known, which can happen if this behavior is started with
   // a voice command
-  const bool chargerEqualsRobot = ( charger == nullptr && _iConfig.allowNoCharger );
+  const bool chargerEqualsRobot = ( charger == nullptr && _iConfig.allowNoCharger ) ||
+    ( CameraService::hasInstance() && CameraService::getInstance()->IsInjectingFakeFrames() );
   const auto& chargerPose = chargerEqualsRobot ? currRobotPose : charger->GetPose();
   
   // check how far the robot is from the charger.. if it's far enough, only sample points to get it closer

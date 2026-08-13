@@ -21,6 +21,7 @@
 #include "engine/aiComponent/beiConditions/conditions/conditionMotionDetected.h"
 #include "engine/components/animationComponent.h"
 #include "engine/components/movementComponent.h"
+#include "camera/cameraService.h"
 #include "coretech/common/engine/jsonTools.h"
 #include "coretech/common/engine/utils/timer.h"
 #include "util/console/consoleInterface.h"
@@ -130,6 +131,10 @@ BehaviorReactToMotion::~BehaviorReactToMotion()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool BehaviorReactToMotion::WantsToBeActivatedBehavior() const
 {
+  if( CameraService::hasInstance() &&
+      CameraService::getInstance()->IsInjectingFakeFrames() ) {
+    return false;
+  }
   for( const auto& motionCondition : _dVars.motionConditions ) {
     if( motionCondition.sawMotionLastTick ) {
       return true;

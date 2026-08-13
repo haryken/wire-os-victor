@@ -196,6 +196,11 @@ namespace Anki {
       return 0;
     }
 
+    bool CameraService::IsInjectingFakeFrames() const
+    {
+      return false;
+    }
+
     Result CameraService::Update()
     {
       return RESULT_OK;
