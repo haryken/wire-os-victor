@@ -2556,50 +2556,11 @@ void Robot::DevReplaceAIComponent(AIComponent* aiComponent, bool shouldManage)
 
 bool Robot::UpdateCameraStartupChecks(Result& res)
 {
-  enum State {
-    FAILED = -1,
-    WAITING,
-    PASSED,
-  };
-
-  const float currentTime_sec = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
-  static float firstUpdateTime_sec = currentTime_sec;
-  static State state = State::WAITING;
-
-  if(state == State::WAITING)
-  {
-    // Manually capture images here until VisionComponent is up and running
-    if(!GetVisionComponent().HasStartedCapturingImages())
-    {
-      // Try to get a frame
-      Vision::ImageBuffer buffer;
-      if(CameraService::getInstance()->CameraGetFrame(0, buffer))
-      {
-        CameraService::getInstance()->CameraReleaseFrame(buffer.GetImageId());
-      }
-    }
-
-    // After 4 seconds, check if we have gotten a frame
-    if(currentTime_sec - firstUpdateTime_sec > 4.f)
-    {
-      using namespace RobotInterface;
-
-      // If we haven't gotten a frame then display an error code
-      if(!CameraService::getInstance()->HaveGottenFrame())
-      {
-        state = State::FAILED;
-        FaultCode::DisplayFaultCode(FaultCode::CAMERA_FAILURE);
-      }
-      // Otherwise the camera works
-      else
-      {
-        state = State::PASSED;
-      }
-    }
-  }
-
-  res = (state == State::FAILED ? RESULT_FAIL : RESULT_OK);
-  return (state != State::WAITING);
+  // WireOS: skip camera frame check (fault 980). Robots with a working
+  // camera still capture via VisionComponent; broken-camera units can boot
+  // instead of getting stuck before UpdateComponents.
+  res = RESULT_OK;
+  return true;
 }
 
 bool Robot::UpdateToFStartupChecks(Result& res)

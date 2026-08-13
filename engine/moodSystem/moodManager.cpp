@@ -37,11 +37,15 @@
 #include "util/console/consoleInterface.h"
 #include "util/cpuProfiler/cpuProfiler.h"
 #include "util/graphEvaluator/graphEvaluator2d.h"
+#include "util/fileUtils/fileUtils.h"
 #include "util/logging/DAS.h"
 #include "util/logging/logging.h"
 #include "util/math/math.h"
 #include "webServerProcess/src/webService.h"
+#include <algorithm>
 #include <assert.h>
+#include <cctype>
+#include <cstdlib>
 
 namespace Anki {
 namespace Vector {
@@ -64,6 +68,53 @@ static const char* kSimpleMoodAudioKey = "simpleMoodAudioParameters";
 CONSOLE_VAR(float, kMoodManager_AudioSendPeriod_s, "MoodManager", 0.5f);
 CONSOLE_VAR(float, kMoodManager_WebVizPeriod_s, "MoodManager", 1.0f);
 CONSOLE_VAR(float, kMoodManager_AppPeriod_s, "MoodManager", 1.0f);
+
+  // Wired web UI writes this; missing/empty/"auto" = stock stim decay.
+  const char* const kWiredStimHoldPath = "/data/wired/mods/StimStats/hold";
+  const float kWiredStimHoldCacheSec = 0.5f;
+
+  void ApplyWiredStimHold(MoodManager& mood)
+  {
+    static float sLastCheckTime = -1000.f;
+    static bool sHolding = false;
+    static float sHeldValue = 0.f;
+
+    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+    if ((now - sLastCheckTime) >= kWiredStimHoldCacheSec) {
+      sLastCheckTime = now;
+      sHolding = false;
+
+      if (Util::FileUtils::FileExists(kWiredStimHoldPath)) {
+        std::string contents = Util::FileUtils::ReadFile(kWiredStimHoldPath);
+        contents.erase(contents.begin(),
+                       std::find_if(contents.begin(), contents.end(),
+                                    [](unsigned char c) { return !std::isspace(c); }));
+        contents.erase(std::find_if(contents.rbegin(), contents.rend(),
+                                    [](unsigned char c) { return !std::isspace(c); }).base(),
+                       contents.end());
+        std::transform(contents.begin(), contents.end(), contents.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        if (!contents.empty() &&
+            contents != "auto" && contents != "off" && contents != "false" &&
+            contents != "none") {
+          char* end = nullptr;
+          const float parsed = std::strtof(contents.c_str(), &end);
+          if (end != contents.c_str()) {
+            sHolding = true;
+            sHeldValue = Util::Clamp(parsed, 0.f, 1.f);
+          }
+        }
+      }
+    }
+
+    if (sHolding) {
+      mood.SetEmotionFixed(EmotionType::Stimulated, true);
+      mood.SetEmotion(EmotionType::Stimulated, sHeldValue, "WiredStimHold");
+    } else {
+      mood.SetEmotionFixed(EmotionType::Stimulated, false);
+    }
+  }
 }
 
 
@@ -306,6 +357,9 @@ void MoodManager::Reset()
 void MoodManager::UpdateDependent(const RobotCompMap& dependentComps)
 {
   ANKI_CPU_PROFILE("MoodManager::Update");
+
+  ApplyWiredStimHold(*this);
+
   const float currentTime = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
 
   const float kMinTimeStep = 0.0001f; // minimal sensible timestep, should be at least > epsilon

@@ -2917,6 +2917,10 @@ namespace Vector {
     // service just in case that knocks something loose
     static const EngineTimeStamp_t kNoImageRestartCamera_ms = kNoImageFaultCodeTimeout_ms/4;
     static const EngineTimeStamp_t kRestartCameraDelay_ms = 1000;
+    // Sentinel meaning "already ran InitCamera this outage". Must not be used
+    // with `!= 0` + `curTime - sentinel > delay` — that comparison is always
+    // true, so InitCamera ran every tick and leaked RAM / flooded the journal.
+    static const EngineTimeStamp_t kRestartDoneSentinel_ms = 1;
     static EngineTimeStamp_t sTimeSinceValidImg_ms = 0;
 
     const bool inPowerSave = _robot->GetComponent<PowerStateManager>().InPowerSaveMode();
@@ -2927,16 +2931,14 @@ namespace Vector {
       {
         sTimeSinceValidImg_ms = curTime_ms;
       }
-      // If it has been way too long since we last received an image, show a fault code
-      else if(curTime_ms - sTimeSinceValidImg_ms > kNoImageFaultCodeTimeout_ms)
+
+      const EngineTimeStamp_t elapsed_ms = curTime_ms - sTimeSinceValidImg_ms;
+
+      // One Delete+Init per outage. Do not reset the outage timer on the 60s
+      // mark — that re-entered InitCamera every tick after we skipped fault 981.
+      if(elapsed_ms > kNoImageRestartCamera_ms &&
+         _restartingCameraTime_ms != kRestartDoneSentinel_ms)
       {
-        FaultCode::DisplayFaultCode(FaultCode::CAMERA_STOPPED);
-        sTimeSinceValidImg_ms = 0;
-      }
-      // If we haven't received an image for some amount of time, try restarting camera
-      else if(curTime_ms - sTimeSinceValidImg_ms > kNoImageRestartCamera_ms)
-      {
-        // First we need to stop the camera
         if(_restartingCameraTime_ms == 0)
         {
           _restartingCameraTime_ms = curTime_ms;
@@ -2945,18 +2947,26 @@ namespace Vector {
           auto cameraService = CameraService::getInstance();
           cameraService->DeleteCamera();
         }
-        // Some time after stopping the camera, try to start it back up
-        // Stopping/Starting are asynchronous so we need to wait a bit between the calls
-        else if(_restartingCameraTime_ms != 0 &&
-                curTime_ms - _restartingCameraTime_ms > kRestartCameraDelay_ms)
+        else if(curTime_ms - _restartingCameraTime_ms > kRestartCameraDelay_ms)
         {
-          // Prevent the camera restart checks from triggering again until we either
-          // start getting images again or the CAMERA_STOPPED fault code triggers
-          _restartingCameraTime_ms = 1;
+          _restartingCameraTime_ms = kRestartDoneSentinel_ms;
           LOG_WARNING("VisionComponent.Update.RestartingCamera",
                       "Too long without valid image, starting camera back up");
           auto cameraService = CameraService::getInstance();
           cameraService->InitCamera();
+        }
+      }
+
+      // WireOS: do not show fault 981 (CAMERA_STOPPED) on the face.
+      if(elapsed_ms > kNoImageFaultCodeTimeout_ms)
+      {
+        static EngineTimeStamp_t sLoggedOutageStart_ms = 0;
+        if(sLoggedOutageStart_ms != sTimeSinceValidImg_ms)
+        {
+          sLoggedOutageStart_ms = sTimeSinceValidImg_ms;
+          LOG_WARNING("VisionComponent.Update.NoImageTimeout",
+                      "No image for %ums (fault 981 display skipped)",
+                      static_cast<unsigned int>(kNoImageFaultCodeTimeout_ms));
         }
       }
     }

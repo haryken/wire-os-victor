@@ -218,11 +218,10 @@ void BehaviorBlackJack::BehaviorUpdate()
 void BehaviorBlackJack::TransitionToTurnToFace()
 {
   SET_STATE(TurnToFace);
-  if(_iConfig.lookAtFaceInFrontBehavior->WantsToBeActivated()){
-    DelegateIfInControl(_iConfig.lookAtFaceInFrontBehavior.get(), &BehaviorBlackJack::TransitionToGetIn);
-  } else {
-    TransitionToGetIn();
-  }
+  // WireOS: LookAtFaceInFront waits for camera frames (WaitForImagesAction).
+  // On a dead camera that never completes, so blackjack never deals cards.
+  // Skip straight to GetIn — the game does not need a detected face.
+  TransitionToGetIn();
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
