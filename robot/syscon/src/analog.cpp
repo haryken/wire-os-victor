@@ -47,6 +47,9 @@ static const int BOUNCE_LENGTH = 3;
 static const int MINIMUM_RELEASE_UNSTUCK = 20;
 static const int BUTTON_THRESHOLD = ADC_VOLTS(2.0) * 2;
 
+// Xrays run a little hotter. Give them a break when testing for overheating
+static const int XRAY_TEMP_ALLOWANCE = 5;
+
 static bool is_charging = false;
 bool Analog::on_charger = false;
 static bool charge_cutoff = false;
@@ -446,13 +449,32 @@ void Analog::tick(void) {
 
   // Mostly charging state and circuitry code here.
 
-  // WireOS: always allow charging when docked. Do not cut the charge circuit
-  // because the body is merely warm (stock Anki used >41°C in the first second
-  // and latched that cut until temp fell to 41°C — robot slept and waited).
-  // Extreme heat still shuts the robot down in handleTemperature() (60/70°C).
-  too_hot = false;
+  // Here we check to see if the robot body is hot the first second
+  // it is on the charger. If so, charging is disabled. It is unclear
+  // where Anki got 41 degrees, where later they don't care until
+  // the temp hits 47 degrees for an extended period of time.
+  //
+  // It's possible this is a remnant of old battery discharging code
+  // per commits?
+  //
+  // Still for now we keep this in in case its a safety feature,
+  // but give XRAY robots a little more leeway since their bigger
+  // batteries run hot.
+  int too_hot_temp = 41;
+  if (IS_XRAY) {
+    too_hot_temp += XRAY_TEMP_ALLOWANCE;
+  }
+  
+  if (temperature > too_hot_temp && on_charger_time < TICKS_PER_SECOND) {
+    too_hot = true;
+  } else {
+    too_hot = false;
+  }
 
-  bool prevent_charge = disable_charger;
+  // Mostly test the change above or if we've explicitly received a
+  // disable command from the head or programming fixture.
+  bool prevent_charge = too_hot
+    || disable_charger;
 
   if (on_charger) {
     // This holds the on_charger_time at zero if charging is disabled

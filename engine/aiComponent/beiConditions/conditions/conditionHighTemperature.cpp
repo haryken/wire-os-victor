@@ -33,9 +33,6 @@ namespace
   // up further while he's frantically searching for and
   // docking to the charger.
   const int kBatteryOverheatingThreshold_degC = 55;
-
-  // i don't LIKE it
-  const bool skipOverheatCheck = true;
 }
 
 ConditionHighTemperature::ConditionHighTemperature(const Json::Value& config)
@@ -47,7 +44,7 @@ bool ConditionHighTemperature::AreConditionsMetInternal(BehaviorExternalInterfac
 {
   const bool hotCPU     = bei.GetRobotInfo().GetCpuTemperature_degC() >= kCPUOverheatingThreshold_degC;
   const bool hotBattery = bei.GetRobotInfo().GetBatteryComponent().GetBatteryTemperature_C() >= kBatteryOverheatingThreshold_degC;
-  return hotCPU || (hotBattery && !skipOverheatCheck);
+  return hotCPU || hotBattery;
 }
 
 }

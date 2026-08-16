@@ -106,13 +106,8 @@ public:
   //       has actually suspended charging but will resume when the battery has cooled down.
   bool IsCharging() const { return _isCharging; }
 
-  // WireOS: never report "too hot to charge". Body firmware charges whenever
-  // docked (except pin-full). Extreme heat (60/70°C) shuts the robot down in
-  // syscon instead of stalling charge. Returning false here stops the
-  // thermometer face and sleep-until-cool loop.
-  bool IsChargingStalledBecauseTooHot() const {
-    return false;
-  } 
+  // HACK - Xray robots are showing too hot sprite even tho it should work.   
+  bool IsChargingStalledBecauseTooHot() const { return _isCharging && _battDisconnected && (IsXray() ? _battTemperature_C > 55 : 1); } 
   
   // Indicates that the robot is sensing voltage on its charge contacts
   bool IsOnChargerContacts() const { return _isOnChargerContacts; }
