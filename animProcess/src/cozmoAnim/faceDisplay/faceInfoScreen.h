@@ -56,6 +56,8 @@ public:
   // screen that is returned by that function
   using MenuItemAction = std::function<ScreenName()>;
   void AppendMenuItem(const std::string& text, MenuItemAction action);
+
+  void ClearMenuItems();
   
   // Specify functions to execute when entering or exiting the screen
   using ScreenAction = std::function<void()>;

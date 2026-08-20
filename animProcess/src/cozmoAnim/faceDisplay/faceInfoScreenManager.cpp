@@ -131,6 +131,27 @@ namespace {
   // How often connectivity checks are performed while on 
   // Main and Network screens.
   const u32 kIPCheckPeriod_sec = 20;
+
+  const char* kPreferBleFlag = "/run/wireos-prefer-ble";
+  const char* kSetupAPFlag = "/run/wireos-setup-ap";
+  const char* kOpenAPIP = "10.3.141.1";
+
+  bool IsSetupAPOn() {
+    return Util::FileUtils::FileExists(kSetupAPFlag);
+  }
+
+  bool HasHomeWifi() {
+    if (IsSetupAPOn()) {
+      return false;
+    }
+    auto* os = OSState::getInstance();
+    const std::string ip = os->GetIPAddress();
+    if (ip == kOpenAPIP) {
+      return false;
+    }
+    const std::string ssid = os->GetSSID();
+    return !ssid.empty() && os->IsValidIPAddress(ip);
+  }
   
   const f32 kAlexaTimeout_s = 5.0f;
 
@@ -224,6 +245,8 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   ADD_SCREEN(Main, Network);
   ADD_SCREEN_WITH_TEXT(ClearUserData, Main, {"CLEAR OUT SOUL?"});
   ADD_SCREEN_WITH_TEXT(ClearUserDataFail, Main, {"UNABLE TO CLEAR SOUL"});
+  ADD_SCREEN_WITH_TEXT(WifiViaBle, Main, {"WIFI BY BLUE?"});
+  ADD_SCREEN_WITH_TEXT(WifiViaHotspot, Main, {"WIFI HOTSPOT?"});
   ADD_SCREEN_WITH_TEXT(Rebooting, Rebooting, {"Vector will remember that..."});
   ADD_SCREEN_WITH_TEXT(SelfTest, Main, {"START SELF TEST?"});
   ADD_SCREEN(SelfTestRunning, SelfTestRunning)
@@ -309,15 +332,10 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
 
   // === Main screen ===
   auto mainEnterFcn = [this]() {
+    RebuildMainMenu();
     DrawMain();
   };
   SET_ENTER_ACTION(Main, mainEnterFcn);
-
-  ADD_MENU_ITEM(Main, "EXIT", None);
-#if ENABLE_SELF_TEST
-  ADD_MENU_ITEM(Main, IsXray() ? "TEST" : "SELF TEST", SelfTest);
-#endif
-  ADD_MENU_ITEM(Main, IsXray() ? "CLEAR" : "CLEAR OUT SOUL", ClearUserData);
 
   // === Self test screen ===
   ADD_MENU_ITEM(SelfTest, "EXIT", Main);
@@ -333,7 +351,7 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   
   // Clear User Data menu
   FaceInfoScreen::MenuItemAction confirmClearUserData = [this]() {
-    // Write this file to indicate that the data partition should be wiped on reboot
+    // Wipe /data on reboot. Xiaozhi + wake word live on /persist/xiaozhi (not /data).
     if (!Util::FileUtils::WriteFile("/run/wipe-data", "1")) {
       LOG_WARNING("FaceInfoScreenManager.ClearUserData.Failed", "");
       return ScreenName::ClearUserDataFail;
@@ -347,6 +365,23 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   ADD_MENU_ITEM(ClearUserData, "EXIT", Main);
   ADD_MENU_ITEM_WITH_ACTION(ClearUserData, "CONFIRM", confirmClearUserData);
   SET_TIMEOUT(ClearUserDataFail, 2.f, Main);
+
+  // WiFi setup method: BLE vs open hotspot (one radio — cannot do both).
+  FaceInfoScreen::MenuItemAction confirmWifiBle = []() {
+    Util::FileUtils::WriteFile(kPreferBleFlag, "1");
+    RobotInterface::SendAnimToEngine(SwitchboardInterface::EnterPairing());
+    return ScreenName::Pairing;
+  };
+  ADD_MENU_ITEM(WifiViaBle, "EXIT", Main);
+  ADD_MENU_ITEM_WITH_ACTION(WifiViaBle, "CONFIRM", confirmWifiBle);
+
+  FaceInfoScreen::MenuItemAction confirmWifiHotspot = []() {
+    Util::FileUtils::DeleteFile(kPreferBleFlag);
+    RobotInterface::SendAnimToEngine(SwitchboardInterface::ExitPairing());
+    return ScreenName::Main;
+  };
+  ADD_MENU_ITEM(WifiViaHotspot, "EXIT", Main);
+  ADD_MENU_ITEM_WITH_ACTION(WifiViaHotspot, "CONFIRM", confirmWifiHotspot);
 
 
   // === Network screen ===
@@ -456,6 +491,7 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
     SET_EXIT_ACTION(ToF, exitToFScreen);
   }
 
+  RebuildMainMenu();
   
   // Check if we booted in recovery mode
   if (OSState::getInstance()->IsInRecoveryMode()) {
@@ -1027,8 +1063,6 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
                       singlePressDetected, 
                       doublePressDetected);
 
-  const bool isOnCharger = static_cast<bool>(state.status & (uint32_t)RobotStatusFlag::IS_ON_CHARGER);
-
   const ScreenName currScreenName = GetCurrScreenName();
 
   if (singlePressDetected && _engineLoaded) {
@@ -1046,11 +1080,8 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
     }
   }
 
-  // Check for conditions to enter BLE pairing mode
-  if (doublePressDetected && 
-      isOnCharger &&
-      // Only enter pairing from these three screens which include
-      // screens that are normally active during playpen test
+  // BLE pairing: double backpack press, on or off charger (WireOS: mute-on-double-press removed).
+  if (doublePressDetected &&
       CanEnterPairingFromScreen(currScreenName)) {
     LOG_INFO("FaceInfoScreenManager.ProcessMenuNavigation.GotDoublePress", "Entering pairing");
     RobotInterface::SendAnimToEngine(SwitchboardInterface::EnterPairing());
@@ -1060,13 +1091,6 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
                   "Remove FORCE_TRANSITION_TO_PAIRING when switchboard is working");
       SetScreen(ScreenName::Pairing);
     }
-  }
-  else if(doublePressDetected &&
-          !isOnCharger && // while user-facing instructions may say "pick up the robot and double press," it's really just off charger
-          _engineLoaded &&
-          CanEnterPairingFromScreen(currScreenName))
-  {
-    ToggleMute("DOUBLE_PRESS");
   }
 
   // Check for button press to go to next debug screen
@@ -1208,6 +1232,9 @@ void FaceInfoScreenManager::Update(const RobotState& state)
   switch(currScreenName) {
     case ScreenName::Main:
     {
+      if (RebuildMainMenu()) {
+        DrawMain();
+      }
       static float lastTime = 0;
       const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
       if ( (now - lastTime) > kIPCheckPeriod_sec ) {
@@ -1261,8 +1288,39 @@ void FaceInfoScreenManager::Update(const RobotState& state)
   }
 }
 
+bool FaceInfoScreenManager::RebuildMainMenu()
+{
+  uint8_t mode = 1; // home wifi — hide setup-method toggle
+  if (!HasHomeWifi()) {
+    mode = IsSetupAPOn() ? 2 : 3; // hotspot → offer BLE; else offer hotspot
+  }
+  if (mode == _mainWifiMenuMode) {
+    return false;
+  }
+  _mainWifiMenuMode = mode;
+
+  auto* main = GetScreen(ScreenName::Main);
+  main->ClearMenuItems();
+  main->AppendMenuItem("EXIT", ScreenName::None);
+
+  if (mode == 1) {
+#if ENABLE_SELF_TEST
+    main->AppendMenuItem(IsXray() ? "TEST" : "SELF TEST", ScreenName::SelfTest);
+#endif
+  } else if (mode == 2) {
+    main->AppendMenuItem("WIFI BY BLUE", ScreenName::WifiViaBle);
+  } else {
+    main->AppendMenuItem("WIFI HOTSPOT", ScreenName::WifiViaHotspot);
+  }
+
+  main->AppendMenuItem(IsXray() ? "CLEAR" : "CLEAR OUT SOUL", ScreenName::ClearUserData);
+  return true;
+}
+
 void FaceInfoScreenManager::DrawMain()
 {
+  RebuildMainMenu();
+
   auto *osstate = OSState::getInstance();
 
   std::string esn = osstate->GetSerialNumberAsString();

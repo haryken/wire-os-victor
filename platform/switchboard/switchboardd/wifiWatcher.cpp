@@ -14,6 +14,12 @@
 #include "log.h"
 #include "util/fileUtils/fileUtils.h"
 #include "wifiWatcher.h"
+#include "exec_command.h"
+
+#include <cutils/properties.h>
+#include <cstring>
+#include <string>
+#include <vector>
 
 namespace Anki {
 namespace Switchboard {
@@ -44,13 +50,15 @@ void WifiWatcher::ConnectIfNoWifi() {
     return;
   }
 
-  if(Wifi::IsAccessPointMode()) {
-    Log::Write("WifiWatcher: access point mode enabled, doing nothing this tick.");
+  // User-triggered join in progress (wired) — do not fight ConnMan.
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying")) {
+    Log::Write("WifiWatcher: home WiFi join in progress, skip recover/AP");
     return;
   }
 
-  if(!HasKnownWifiConfigurations()) {
-    Log::Write("WifiWatcher: no known wifi networks, doing nothing this tick.");
+  if(Wifi::IsAccessPointMode()) {
+    Log::Write("WifiWatcher: access point mode enabled, doing nothing this tick.");
+    _offlineTicks = 0;
     return;
   }
 
@@ -58,7 +66,13 @@ void WifiWatcher::ConnectIfNoWifi() {
 
   if((wifiState.connState == Anki::Wifi::WiFiConnState::CONNECTED) ||
     (wifiState.connState == Anki::Wifi::WiFiConnState::ONLINE)) {
-    // robot is on wifi, so carry on!
+    _offlineTicks = 0;
+    return;
+  }
+
+  if(!HasKnownWifiConfigurations()) {
+    Log::Write("WifiWatcher: no known wifi networks.");
+    MaybeStartSetupAccessPoint();
     return;
   }
 
@@ -72,7 +86,8 @@ void WifiWatcher::ConnectIfNoWifi() {
   Anki::Wifi::WifiScanErrorCode code = Anki::Wifi::GetWiFiServices(results, shouldScan);
 
   if(code != Anki::Wifi::WifiScanErrorCode::SUCCESS) {
-    // can't scan for wifi
+    Log::Write("WifiWatcher: wifi scan failed, maybe setup AP");
+    MaybeStartSetupAccessPoint();
     return;
   }
 
@@ -89,8 +104,10 @@ void WifiWatcher::ConnectIfNoWifi() {
       if(connectResult == Anki::Wifi::ConnectWifiResult::CONNECT_SUCCESS) {
         // reset error counter
         _connectErrorCount = 0;
+        _offlineTicks = 0;
 
         Log::Write("WifiWatcher: Switchboard autoconnected to wifi successfully.");
+        return;
       } else {
         if(++_connectErrorCount >= kMaxErrorBeforeRestart) {
           // restart wpa_supplicant/connman
@@ -105,14 +122,72 @@ void WifiWatcher::ConnectIfNoWifi() {
       break;
     }
   }
+
+  MaybeStartSetupAccessPoint();
+}
+
+void WifiWatcher::MaybeStartSetupAccessPoint() {
+  // Boot: wired waits for ConnMan to rejoin saved home WiFi before raising AP.
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-boot-wait")) {
+    Log::Write("WifiWatcher: boot wait for saved WiFi, skip setup AP");
+    return;
+  }
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying")) {
+    Log::Write("WifiWatcher: home WiFi join in progress, skip setup AP");
+    return;
+  }
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-prefer-ble")) {
+    if(Anki::Util::FileUtils::FileExists("/run/wireos-setup-ap")) {
+      Log::Write("WifiWatcher: BLE wifi chosen, stopping setup AP");
+      Anki::ExecCommand({"/usr/bin/vic-setup-ap", "off"});
+    }
+    return;
+  }
+  if(Wifi::IsAccessPointMode()) {
+    return;
+  }
+  if(_offlineTicks < 255) {
+    ++_offlineTicks;
+  }
+  const uint8_t needTicks = HasKnownWifiConfigurations()
+                              ? kOfflineTicksBeforeApSaved
+                              : kOfflineTicksBeforeAp;
+  if(_offlineTicks < needTicks) {
+    Log::Write("WifiWatcher: offline tick %u/%u (setup AP soon)",
+               (unsigned)_offlineTicks, (unsigned)needTicks);
+    return;
+  }
+
+  char vicName[PROPERTY_VALUE_MAX] = {0};
+  (void)property_get("anki.robot.name", vicName, "Vector");
+  if(vicName[0] == '\0') {
+    std::strncpy(vicName, "Vector", PROPERTY_VALUE_MAX - 1);
+  }
+  // ConnMan tethering cannot do an open AP — use wpa_supplicant AP (no password).
+  Log::Write("WifiWatcher: starting open setup AP ssid=%s", vicName);
+  int rc = Anki::ExecCommand({"/usr/bin/vic-setup-ap", "on", vicName});
+  if(rc != 0) {
+    rc = Anki::ExecCommand({"/anki/bin/vic-setup-ap", "on", vicName});
+  }
+  if(rc != 0) {
+    Log::Write("WifiWatcher: open AP failed");
+    return;
+  }
+  _offlineTicks = 0;
 }
 
 bool WifiWatcher::HasKnownWifiConfigurations() {
-  // Check if any networks are configured
+  if (Anki::Util::FileUtils::FileExists("/data/lib/connman/wireos-wifi.config")) {
+    return true;
+  }
   std::vector<std::string> configs;
   Anki::Util::FileUtils::ListAllDirectories("/data/lib/connman", configs);
-
-  return configs.size() > 0;
+  for (const auto& name : configs) {
+    if (name.size() >= 4 && name.compare(0, 4, "wifi") == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void WifiWatcher::WatcherTick(struct ev_loop* loop, struct ev_timer* w, int revents) {
