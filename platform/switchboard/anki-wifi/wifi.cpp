@@ -16,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <linux/wireless.h>
 #include <ifaddrs.h>
+#include <unistd.h>
 #include "anki-ble/common/stringutils.h"
 #include "log.h"
 #include "wifi.h"
@@ -1336,6 +1337,9 @@ bool GetIpFromHostName(char* hostName, char* ipAddressOut) {
 }
 
 bool IsAccessPointMode() {
+  if (access("/run/wireos-setup-ap", F_OK) == 0) {
+    return true;
+  }
   GError* error = nullptr;
 
   GVariant* properties;
@@ -1465,6 +1469,12 @@ bool EnableAccessPointMode(std::string ssid, std::string pw) {
 }
 
 bool DisableAccessPointMode() {
+  // Only tear down WireOS open AP when it is actually up.
+  // Unconditional vic-setup-ap off at boot thrashes wlan and triggers fault 917.
+  if (access("/run/wireos-setup-ap", F_OK) == 0) {
+    (void)ExecCommand({"/usr/bin/vic-setup-ap", "off"});
+    (void)ExecCommand({"/anki/bin/vic-setup-ap", "off"});
+  }
   GError* error = nullptr;
 
   GVariant* enable_b = g_variant_new_boolean(false);

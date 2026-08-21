@@ -32,6 +32,7 @@ private:
   static void WatcherTick(struct ev_loop* loop, struct ev_timer* w, int revents);
 
   bool HasKnownWifiConfigurations();
+  void MaybeStartSetupAccessPoint();
 
   struct ev_loop* _loop;
 
@@ -42,8 +43,11 @@ private:
 
   const uint8_t kWifiTick_s = 15;
   const uint8_t kMaxErrorBeforeRestart = 5;
-  
+  const uint8_t kOfflineTicksBeforeAp = 3;       // no saved WiFi ~45s → setup hotspot
+  const uint8_t kOfflineTicksBeforeApSaved = 6;  // saved WiFi ~90s, let ConnMan join first
+
   uint8_t _connectErrorCount = 0;
+  uint8_t _offlineTicks = 0;
   bool _enabled = true;
 };
 
