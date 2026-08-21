@@ -36,6 +36,17 @@ if [ -d "${PANICS_DIR}" ]; then
 fi
 
 #
+# After CLEAR OUT SOUL, mount-data only creates /data/data/com.anki.victor.
+# If wired (root) mkdir's persistent/ first, it becomes root:root 755 and
+# vic-switchboard (User=net) cannot create sessions → fault 913.
+#
+VICTOR_DATA="/data/data/com.anki.victor"
+mkdir -p "${VICTOR_DATA}/persistent/switchboard" "${VICTOR_DATA}/cache"
+chown anki:anki "${VICTOR_DATA}" "${VICTOR_DATA}/persistent" "${VICTOR_DATA}/cache" 2>/dev/null || true
+chmod 770 "${VICTOR_DATA}" "${VICTOR_DATA}/persistent" "${VICTOR_DATA}/cache" "${VICTOR_DATA}/persistent/switchboard" 2>/dev/null || true
+chown -R net:anki "${VICTOR_DATA}/persistent/switchboard" 2>/dev/null || true
+
+#
 # Clear fault code, if any
 #
 /bin/fault-code-clear
