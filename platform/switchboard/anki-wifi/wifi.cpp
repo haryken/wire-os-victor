@@ -1220,6 +1220,12 @@ WiFiState GetWiFiState() {
         } else if(state == "online") {
           isAssociated = true;
           connState = WiFiConnState::ONLINE;
+        } else if(state == "association" || state == "configuration" ||
+                  state == "login") {
+          // Mid-join / DHCP (face may show SSID + 169.254). Treat as connected
+          // so WifiWatcher does not raise the open AP and kill ConnMan.
+          isAssociated = true;
+          connState = WiFiConnState::CONNECTED;
         }
       }
 

@@ -48,7 +48,8 @@ private:
   const uint8_t kWifiTick_s = 15;
   const uint8_t kMaxErrorBeforeRestart = 5;
   const uint8_t kOfflineTicksBeforeAp = 3;       // no saved WiFi ~45s → setup hotspot
-  const uint8_t kOfflineTicksBeforeApSaved = 6;  // saved WiFi ~90s, let ConnMan join first
+  // Saved WiFi: wait longer (~2.5 min) for assoc+DHCP before open AP.
+  const uint8_t kOfflineTicksBeforeApSaved = 10;
 
   uint8_t _connectErrorCount = 0;
   uint8_t _offlineTicks = 0;

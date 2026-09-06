@@ -181,12 +181,29 @@ namespace {
            (i + 7 >= raw.size() || raw[i + 7] == '\n' || raw[i + 7] == '\r' || raw[i + 7] == ' ' || raw[i + 7] == '\t');
   }
 
-  // Stamp /run for immediate face menu flip; ask wired (root) to persist.
+  // Cached so RebuildMainMenu (called every anim tick on Main) does not hammer
+  // disk / stall the RT loop — that previously correlated with RadioSend fail → 917.
+  float gWifiModeCacheTime_sec = -1000.f;
+  bool gPreferBleCached = true;
+  float gHomeWifiCacheTime_sec = -1000.f;
+  bool gHasHomeWifiCached = false;
+  const float kWifiFaceCachePeriod_sec = 1.0f;
+
+  void InvalidateWifiFaceCache() {
+    gWifiModeCacheTime_sec = -1000.f;
+    gHomeWifiCacheTime_sec = -1000.f;
+  }
+
+  // Stamp /run + /data immediately; mirror to /persist via wired without blocking anim.
   void PersistWifiSetupMode(const char* mode) {
-    Util::FileUtils::WriteFile(kWifiSetupModeRun, std::string(mode) + "\n");
+    const std::string line = std::string(mode) + "\n";
+    Util::FileUtils::WriteFile(kWifiSetupModeRun, line);
+    Util::FileUtils::WriteFile(kWifiSetupModeFile, line);
+    InvalidateWifiFaceCache();
+    // Background only — never system(curl) sync on the anim thread (blocks → 917).
     const std::string cmd =
-        std::string("curl -s -d mode=") + mode +
-        " http://127.0.0.1:8080/api/mods/WifiSetup/mode >/dev/null 2>&1";
+        std::string("(curl -s -m 2 -d mode=") + mode +
+        " http://127.0.0.1:8080/api/mods/WifiSetup/mode >/dev/null 2>&1 &)";
     (void)std::system(cmd.c_str());
   }
 
@@ -203,21 +220,36 @@ namespace {
   }
 
   bool PreferBleWifiMode() {
+    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+    if ((now - gWifiModeCacheTime_sec) < kWifiFaceCachePeriod_sec) {
+      return gPreferBleCached;
+    }
+    gWifiModeCacheTime_sec = now;
     // /run → /data → /persist (avoid stale RO /persist saying ble forever).
     const char* paths[] = {kWifiSetupModeRun, kWifiSetupModeFile, kWifiSetupModePersist};
     for (const char* p : paths) {
       const std::string raw = Util::FileUtils::ReadFile(p);
       if (ModeTextIsHotspot(raw)) {
+        gPreferBleCached = false;
         return false;
       }
       if (ModeTextIsBle(raw)) {
+        gPreferBleCached = true;
         return true;
       }
     }
-    if (Util::FileUtils::FileExists(kPreferBleFlag)) {
-      return true;
+    gPreferBleCached = true; // default BLE
+    return gPreferBleCached;
+  }
+
+  bool HasHomeWifiCached() {
+    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+    if ((now - gHomeWifiCacheTime_sec) < kWifiFaceCachePeriod_sec) {
+      return gHasHomeWifiCached;
     }
-    return true; // default BLE
+    gHomeWifiCacheTime_sec = now;
+    gHasHomeWifiCached = HasHomeWifi();
+    return gHasHomeWifiCached;
   }
   
   const f32 kAlexaTimeout_s = 5.0f;
@@ -1382,7 +1414,7 @@ void FaceInfoScreenManager::Update(const RobotState& state)
 bool FaceInfoScreenManager::RebuildMainMenu()
 {
   uint8_t mode = 1; // home wifi — still allow preference toggle (no AP yet)
-  if (!HasHomeWifi()) {
+  if (!HasHomeWifiCached()) {
     mode = IsSetupAPOn() ? 2 : 3; // hotspot → offer BLE; else offer hotspot
   }
   // Include preferred setup method so web/:80/:8080 changes refresh the face menu.
