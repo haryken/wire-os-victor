@@ -39,6 +39,9 @@
 #include "util/internetUtils/internetUtils.h"
 #include "util/logging/DAS.h"
 
+#include <cstdlib>
+#include <string>
+
 #include "clad/robotInterface/messageRobotToEngine.h"
 #include "clad/robotInterface/messageEngineToRobot_sendAnimToRobot_helper.h"
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
@@ -134,7 +137,14 @@ namespace {
 
   const char* kPreferBleFlag = "/run/wireos-prefer-ble";
   const char* kSetupAPFlag = "/run/wireos-setup-ap";
-  const char* kOpenAPIP = "10.3.141.1";
+  const char* kForceAPFlag = "/run/wireos-force-ap";
+  const char* kBootWaitFlag = "/run/wireos-wifi-boot-wait";
+  const char* kWifiSetupModeFile = "/data/wired/wifi-setup-mode";
+  // Survives Clear User Data. /persist is often on RO rootfs — engine cannot
+  // write it; wired (root) remounts + writes via the mode API.
+  const char* kWifiSetupModePersist = "/persist/wired/wifi-setup-mode";
+  const char* kWifiSetupModeRun = "/run/wireos-wifi-setup-mode";
+  const char* kOpenAPIP = "192.168.4.1";
 
   bool IsSetupAPOn() {
     return Util::FileUtils::FileExists(kSetupAPFlag);
@@ -151,6 +161,63 @@ namespace {
     }
     const std::string ssid = os->GetSSID();
     return !ssid.empty() && os->IsValidIPAddress(ip);
+  }
+
+  bool ModeTextIsBle(const std::string& raw) {
+    size_t i = 0;
+    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r')) {
+      ++i;
+    }
+    return raw.compare(i, 3, "ble") == 0 &&
+           (i + 3 >= raw.size() || raw[i + 3] == '\n' || raw[i + 3] == '\r' || raw[i + 3] == ' ' || raw[i + 3] == '\t');
+  }
+
+  bool ModeTextIsHotspot(const std::string& raw) {
+    size_t i = 0;
+    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r')) {
+      ++i;
+    }
+    return raw.compare(i, 7, "hotspot") == 0 &&
+           (i + 7 >= raw.size() || raw[i + 7] == '\n' || raw[i + 7] == '\r' || raw[i + 7] == ' ' || raw[i + 7] == '\t');
+  }
+
+  // Stamp /run for immediate face menu flip; ask wired (root) to persist.
+  void PersistWifiSetupMode(const char* mode) {
+    Util::FileUtils::WriteFile(kWifiSetupModeRun, std::string(mode) + "\n");
+    const std::string cmd =
+        std::string("curl -s -d mode=") + mode +
+        " http://127.0.0.1:8080/api/mods/WifiSetup/mode >/dev/null 2>&1";
+    (void)std::system(cmd.c_str());
+  }
+
+  void ApplyBleWifiMode() {
+    Util::FileUtils::WriteFile(kPreferBleFlag, "1");
+    Util::FileUtils::DeleteFile(kForceAPFlag);
+    PersistWifiSetupMode("ble");
+  }
+
+  void ApplyHotspotWifiMode() {
+    Util::FileUtils::DeleteFile(kPreferBleFlag);
+    Util::FileUtils::DeleteFile(kBootWaitFlag);
+    PersistWifiSetupMode("hotspot");
+  }
+
+  bool PreferBleWifiMode() {
+    // /run → /data → /persist (avoid stale RO /persist saying ble forever).
+    const char* paths[] = {kWifiSetupModeRun, kWifiSetupModeFile, kWifiSetupModePersist};
+    for (const char* p : paths) {
+      const std::string raw = Util::FileUtils::ReadFile(p);
+      if (ModeTextIsHotspot(raw)) {
+        return false;
+      }
+      if (ModeTextIsBle(raw)) {
+        return true;
+      }
+    }
+    if (Util::FileUtils::FileExists(kPreferBleFlag)) {
+      return true;
+    }
+    return true; // default BLE
   }
   
   const f32 kAlexaTimeout_s = 5.0f;
@@ -351,7 +418,27 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   
   // Clear User Data menu
   FaceInfoScreen::MenuItemAction confirmClearUserData = [this]() {
-    // Wipe /data on reboot. Xiaozhi + wake word live on /persist/xiaozhi (not /data).
+    // Wipe /data on reboot. Preserve WiFi setup mode on /persist (ble/hotspot).
+    // Xiaozhi + wake word also live on /persist/xiaozhi (not /data).
+    {
+      std::string mode = Util::FileUtils::ReadFile(kWifiSetupModePersist);
+      if (mode.empty()) {
+        mode = Util::FileUtils::ReadFile(kWifiSetupModeFile);
+      }
+      // trim
+      size_t i = 0;
+      while (i < mode.size() && (mode[i] == ' ' || mode[i] == '\t' || mode[i] == '\n' || mode[i] == '\r')) {
+        ++i;
+      }
+      size_t j = mode.size();
+      while (j > i && (mode[j - 1] == ' ' || mode[j - 1] == '\t' || mode[j - 1] == '\n' || mode[j - 1] == '\r')) {
+        --j;
+      }
+      const std::string trimmed = mode.substr(i, j - i);
+      if (trimmed == "ble" || trimmed == "hotspot") {
+        PersistWifiSetupMode(trimmed.c_str());
+      }
+    }
     if (!Util::FileUtils::WriteFile("/run/wipe-data", "1")) {
       LOG_WARNING("FaceInfoScreenManager.ClearUserData.Failed", "");
       return ScreenName::ClearUserDataFail;
@@ -368,7 +455,11 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
 
   // WiFi setup method: BLE vs open hotspot (one radio — cannot do both).
   FaceInfoScreen::MenuItemAction confirmWifiBle = []() {
-    Util::FileUtils::WriteFile(kPreferBleFlag, "1");
+    ApplyBleWifiMode();
+    // Online: preference only. Offline: enter BLE pairing to join WiFi.
+    if (HasHomeWifi()) {
+      return ScreenName::Main;
+    }
     RobotInterface::SendAnimToEngine(SwitchboardInterface::EnterPairing());
     return ScreenName::Pairing;
   };
@@ -376,7 +467,7 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   ADD_MENU_ITEM_WITH_ACTION(WifiViaBle, "CONFIRM", confirmWifiBle);
 
   FaceInfoScreen::MenuItemAction confirmWifiHotspot = []() {
-    Util::FileUtils::DeleteFile(kPreferBleFlag);
+    ApplyHotspotWifiMode();
     RobotInterface::SendAnimToEngine(SwitchboardInterface::ExitPairing());
     return ScreenName::Main;
   };
@@ -1290,23 +1381,30 @@ void FaceInfoScreenManager::Update(const RobotState& state)
 
 bool FaceInfoScreenManager::RebuildMainMenu()
 {
-  uint8_t mode = 1; // home wifi — hide setup-method toggle
+  uint8_t mode = 1; // home wifi — still allow preference toggle (no AP yet)
   if (!HasHomeWifi()) {
     mode = IsSetupAPOn() ? 2 : 3; // hotspot → offer BLE; else offer hotspot
   }
-  if (mode == _mainWifiMenuMode) {
+  // Include preferred setup method so web/:80/:8080 changes refresh the face menu.
+  const uint8_t prefer = PreferBleWifiMode() ? 1 : 2;
+  const uint16_t menuKey = static_cast<uint16_t>(mode) | (static_cast<uint16_t>(prefer) << 8);
+  if (menuKey == _mainWifiMenuMode) {
     return false;
   }
-  _mainWifiMenuMode = mode;
+  _mainWifiMenuMode = menuKey;
 
   auto* main = GetScreen(ScreenName::Main);
   main->ClearMenuItems();
   main->AppendMenuItem("EXIT", ScreenName::None);
 
   if (mode == 1) {
-#if ENABLE_SELF_TEST
-    main->AppendMenuItem(IsXray() ? "TEST" : "SELF TEST", ScreenName::SelfTest);
-#endif
+    // Online: replace former SELF TEST with BLE↔Hotspot preference switch.
+    // Choosing Hotspot only saves mode — AP rises when WiFi is lost later.
+    if (PreferBleWifiMode()) {
+      main->AppendMenuItem("WIFI HOTSPOT", ScreenName::WifiViaHotspot);
+    } else {
+      main->AppendMenuItem("WIFI BY BLUE", ScreenName::WifiViaBle);
+    }
   } else if (mode == 2) {
     main->AppendMenuItem("WIFI BY BLUE", ScreenName::WifiViaBle);
   } else {

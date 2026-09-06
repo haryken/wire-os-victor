@@ -93,6 +93,12 @@ void Daemon::Start() {
   InitializeGatewayComms();
   InitializeEngineComms();
 
+  _wifiWatcher->SetStartBlePairingFn([this]() {
+    if (!_isPairing) {
+      StartPairing();
+    }
+  });
+
   // Initialize Cloud Stack Status
   _usesEscapePod = IsVectorConnectedToEscapePod();
   if (_usesEscapePod) {

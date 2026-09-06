@@ -183,7 +183,7 @@ private:
   void DrawMain();
   // Rebuild EXIT / wifi-toggle / CLEAR on Main. True if the menu changed.
   bool RebuildMainMenu();
-  uint8_t _mainWifiMenuMode = 0;
+  uint16_t _mainWifiMenuMode = 0;
   void DrawNetwork();
   void DrawSensorInfo(const RobotState& state);
   void DrawBuildInfo();

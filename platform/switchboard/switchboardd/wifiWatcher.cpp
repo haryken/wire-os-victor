@@ -24,6 +24,40 @@
 namespace Anki {
 namespace Switchboard {
 
+namespace {
+const char* kPreferBleFlag = "/run/wireos-prefer-ble";
+const char* kWifiSetupModeFile = "/data/wired/wifi-setup-mode";
+const char* kWifiSetupModePersist = "/persist/wired/wifi-setup-mode";
+const char* kWifiSetupModeRun = "/run/wireos-wifi-setup-mode";
+
+bool ModeFileIs(const std::string& raw, const char* want, size_t n) {
+  size_t i = 0;
+  while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r')) {
+    ++i;
+  }
+  return raw.compare(i, n, want) == 0 &&
+         (i + n >= raw.size() || raw[i + n] == '\n' || raw[i + n] == '\r' || raw[i + n] == ' ' || raw[i + n] == '\t');
+}
+
+bool PreferBleWifi() {
+  // Match wired/face: /run → /data → /persist (avoid stale RO /persist).
+  const char* paths[] = {kWifiSetupModeRun, kWifiSetupModeFile, kWifiSetupModePersist};
+  for (const char* p : paths) {
+    const std::string raw = Anki::Util::FileUtils::ReadFile(p);
+    if (ModeFileIs(raw, "hotspot", 7)) {
+      return false;
+    }
+    if (ModeFileIs(raw, "ble", 3)) {
+      return true;
+    }
+  }
+  if (Anki::Util::FileUtils::FileExists(kPreferBleFlag)) {
+    return true;
+  }
+  return true;
+}
+}
+
 WifiWatcher::WifiWatcher(struct ev_loop* loop)
 : _loop(loop),
 _enabled(true) {
@@ -51,7 +85,9 @@ void WifiWatcher::ConnectIfNoWifi() {
   }
 
   // User-triggered join in progress (wired) — do not fight ConnMan.
-  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying")) {
+  // Hold-ap mirrors BLE wifiWatcher->Disable() across post-join grace.
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying") ||
+     Anki::Util::FileUtils::FileExists("/run/wireos-wifi-hold-ap")) {
     Log::Write("WifiWatcher: home WiFi join in progress, skip recover/AP");
     return;
   }
@@ -67,6 +103,7 @@ void WifiWatcher::ConnectIfNoWifi() {
   if((wifiState.connState == Anki::Wifi::WiFiConnState::CONNECTED) ||
     (wifiState.connState == Anki::Wifi::WiFiConnState::ONLINE)) {
     _offlineTicks = 0;
+    _blePairingOffered = false;
     return;
   }
 
@@ -132,14 +169,28 @@ void WifiWatcher::MaybeStartSetupAccessPoint() {
     Log::Write("WifiWatcher: boot wait for saved WiFi, skip setup AP");
     return;
   }
-  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying")) {
+  if(Anki::Util::FileUtils::FileExists("/run/wireos-wifi-trying") ||
+     Anki::Util::FileUtils::FileExists("/run/wireos-wifi-hold-ap")) {
     Log::Write("WifiWatcher: home WiFi join in progress, skip setup AP");
     return;
   }
-  if(Anki::Util::FileUtils::FileExists("/run/wireos-prefer-ble")) {
+  if(PreferBleWifi()) {
     if(Anki::Util::FileUtils::FileExists("/run/wireos-setup-ap")) {
       Log::Write("WifiWatcher: BLE wifi chosen, stopping setup AP");
       Anki::ExecCommand({"/usr/bin/vic-setup-ap", "off"});
+    }
+    if(_offlineTicks < 255) {
+      ++_offlineTicks;
+    }
+    const uint8_t needTicks = HasKnownWifiConfigurations()
+                                ? kOfflineTicksBeforeApSaved
+                                : kOfflineTicksBeforeAp;
+    if(_offlineTicks >= needTicks && !_blePairingOffered) {
+      _blePairingOffered = true;
+      if(_startBlePairing) {
+        Log::Write("WifiWatcher: starting BLE pairing (remembered mode)");
+        _startBlePairing();
+      }
     }
     return;
   }
