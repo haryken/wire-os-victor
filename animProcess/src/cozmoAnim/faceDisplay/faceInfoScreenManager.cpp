@@ -39,9 +39,6 @@
 #include "util/internetUtils/internetUtils.h"
 #include "util/logging/DAS.h"
 
-#include <cstdlib>
-#include <string>
-
 #include "clad/robotInterface/messageRobotToEngine.h"
 #include "clad/robotInterface/messageEngineToRobot_sendAnimToRobot_helper.h"
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
@@ -134,121 +131,6 @@ namespace {
   // How often connectivity checks are performed while on 
   // Main and Network screens.
   const u32 kIPCheckPeriod_sec = 20;
-
-  const char* kPreferBleFlag = "/run/wireos-prefer-ble";
-  const char* kSetupAPFlag = "/run/wireos-setup-ap";
-  const char* kForceAPFlag = "/run/wireos-force-ap";
-  const char* kBootWaitFlag = "/run/wireos-wifi-boot-wait";
-  const char* kWifiSetupModeFile = "/data/wired/wifi-setup-mode";
-  // Survives Clear User Data. Only wired reads /data and /persist during
-  // normal operation; the realtime anim process consumes the /run mirror.
-  const char* kWifiSetupModePersist = "/persist/wired/wifi-setup-mode";
-  const char* kWifiSetupModeRun = "/run/wireos-wifi-setup-mode";
-  const char* kOpenAPIP = "192.168.4.1";
-
-  bool IsSetupAPOn() {
-    return Util::FileUtils::FileExists(kSetupAPFlag);
-  }
-
-  bool HasHomeWifi() {
-    if (IsSetupAPOn()) {
-      return false;
-    }
-    auto* os = OSState::getInstance();
-    const std::string ip = os->GetIPAddress();
-    if (ip == kOpenAPIP) {
-      return false;
-    }
-    const std::string ssid = os->GetSSID();
-    return !ssid.empty() && os->IsValidIPAddress(ip);
-  }
-
-  bool ModeTextIsBle(const std::string& raw) {
-    size_t i = 0;
-    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r')) {
-      ++i;
-    }
-    return raw.compare(i, 3, "ble") == 0 &&
-           (i + 3 >= raw.size() || raw[i + 3] == '\n' || raw[i + 3] == '\r' || raw[i + 3] == ' ' || raw[i + 3] == '\t');
-  }
-
-  bool ModeTextIsHotspot(const std::string& raw) {
-    size_t i = 0;
-    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r')) {
-      ++i;
-    }
-    return raw.compare(i, 7, "hotspot") == 0 &&
-           (i + 7 >= raw.size() || raw[i + 7] == '\n' || raw[i + 7] == '\r' || raw[i + 7] == ' ' || raw[i + 7] == '\t');
-  }
-
-  // Cached so RebuildMainMenu (called every anim tick on Main) does not hammer
-  // disk / stall the RT loop — that previously correlated with RadioSend fail → 917.
-  float gWifiModeCacheTime_sec = -1000.f;
-  bool gPreferBleCached = true;
-  float gHomeWifiCacheTime_sec = -1000.f;
-  bool gHasHomeWifiCached = false;
-  const float kWifiFaceCachePeriod_sec = 1.0f;
-
-  void InvalidateWifiFaceCache() {
-    gWifiModeCacheTime_sec = -1000.f;
-    gHomeWifiCacheTime_sec = -1000.f;
-  }
-
-  // Stamp the tmpfs mirror immediately; let wired persist it off the realtime
-  // anim thread.
-  void PersistWifiSetupMode(const char* mode) {
-    const std::string line = std::string(mode) + "\n";
-    Util::FileUtils::WriteFile(kWifiSetupModeRun, line);
-    InvalidateWifiFaceCache();
-    // Background only — never system(curl) sync on the anim thread (blocks → 917).
-    const std::string cmd =
-        std::string("(curl -s -m 2 -d mode=") + mode +
-        " http://127.0.0.1:8080/api/mods/WifiSetup/mode >/dev/null 2>&1 &)";
-    (void)std::system(cmd.c_str());
-  }
-
-  void ApplyBleWifiMode() {
-    Util::FileUtils::WriteFile(kPreferBleFlag, "1");
-    Util::FileUtils::DeleteFile(kForceAPFlag);
-    PersistWifiSetupMode("ble");
-  }
-
-  void ApplyHotspotWifiMode() {
-    Util::FileUtils::DeleteFile(kPreferBleFlag);
-    Util::FileUtils::DeleteFile(kBootWaitFlag);
-    PersistWifiSetupMode("hotspot");
-  }
-
-  bool PreferBleWifiMode() {
-    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
-    if ((now - gWifiModeCacheTime_sec) < kWifiFaceCachePeriod_sec) {
-      return gPreferBleCached;
-    }
-    gWifiModeCacheTime_sec = now;
-    // wired mirrors the persisted choice into /run during startup. Never read
-    // flash-backed /data or /persist from the realtime animation loop.
-    const std::string raw = Util::FileUtils::ReadFile(kWifiSetupModeRun);
-    if (ModeTextIsHotspot(raw)) {
-      gPreferBleCached = false;
-      return false;
-    }
-    if (ModeTextIsBle(raw)) {
-      gPreferBleCached = true;
-      return true;
-    }
-    gPreferBleCached = true; // default BLE
-    return gPreferBleCached;
-  }
-
-  bool HasHomeWifiCached() {
-    const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
-    if ((now - gHomeWifiCacheTime_sec) < kWifiFaceCachePeriod_sec) {
-      return gHasHomeWifiCached;
-    }
-    gHomeWifiCacheTime_sec = now;
-    gHasHomeWifiCached = HasHomeWifi();
-    return gHasHomeWifiCached;
-  }
   
   const f32 kAlexaTimeout_s = 5.0f;
 
@@ -342,8 +224,6 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   ADD_SCREEN(Main, Network);
   ADD_SCREEN_WITH_TEXT(ClearUserData, Main, {"CLEAR OUT SOUL?"});
   ADD_SCREEN_WITH_TEXT(ClearUserDataFail, Main, {"UNABLE TO CLEAR SOUL"});
-  ADD_SCREEN_WITH_TEXT(WifiViaBle, Main, {"WIFI BY BLUE?"});
-  ADD_SCREEN_WITH_TEXT(WifiViaHotspot, Main, {"WIFI HOTSPOT?"});
   ADD_SCREEN_WITH_TEXT(Rebooting, Rebooting, {"Vector will remember that..."});
   ADD_SCREEN_WITH_TEXT(SelfTest, Main, {"START SELF TEST?"});
   ADD_SCREEN(SelfTestRunning, SelfTestRunning)
@@ -429,10 +309,15 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
 
   // === Main screen ===
   auto mainEnterFcn = [this]() {
-    RebuildMainMenu();
     DrawMain();
   };
   SET_ENTER_ACTION(Main, mainEnterFcn);
+
+  ADD_MENU_ITEM(Main, "EXIT", None);
+#if ENABLE_SELF_TEST
+  ADD_MENU_ITEM(Main, IsXray() ? "TEST" : "SELF TEST", SelfTest);
+#endif
+  ADD_MENU_ITEM(Main, IsXray() ? "CLEAR" : "CLEAR OUT SOUL", ClearUserData);
 
   // === Self test screen ===
   ADD_MENU_ITEM(SelfTest, "EXIT", Main);
@@ -448,27 +333,7 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   
   // Clear User Data menu
   FaceInfoScreen::MenuItemAction confirmClearUserData = [this]() {
-    // Wipe /data on reboot. Preserve WiFi setup mode on /persist (ble/hotspot).
-    // Xiaozhi + wake word also live on /persist/xiaozhi (not /data).
-    {
-      std::string mode = Util::FileUtils::ReadFile(kWifiSetupModePersist);
-      if (mode.empty()) {
-        mode = Util::FileUtils::ReadFile(kWifiSetupModeFile);
-      }
-      // trim
-      size_t i = 0;
-      while (i < mode.size() && (mode[i] == ' ' || mode[i] == '\t' || mode[i] == '\n' || mode[i] == '\r')) {
-        ++i;
-      }
-      size_t j = mode.size();
-      while (j > i && (mode[j - 1] == ' ' || mode[j - 1] == '\t' || mode[j - 1] == '\n' || mode[j - 1] == '\r')) {
-        --j;
-      }
-      const std::string trimmed = mode.substr(i, j - i);
-      if (trimmed == "ble" || trimmed == "hotspot") {
-        PersistWifiSetupMode(trimmed.c_str());
-      }
-    }
+    // Write this file to indicate that the data partition should be wiped on reboot
     if (!Util::FileUtils::WriteFile("/run/wipe-data", "1")) {
       LOG_WARNING("FaceInfoScreenManager.ClearUserData.Failed", "");
       return ScreenName::ClearUserDataFail;
@@ -482,27 +347,6 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
   ADD_MENU_ITEM(ClearUserData, "EXIT", Main);
   ADD_MENU_ITEM_WITH_ACTION(ClearUserData, "CONFIRM", confirmClearUserData);
   SET_TIMEOUT(ClearUserDataFail, 2.f, Main);
-
-  // WiFi setup method: BLE vs open hotspot (one radio — cannot do both).
-  FaceInfoScreen::MenuItemAction confirmWifiBle = []() {
-    ApplyBleWifiMode();
-    // Online: preference only. Offline: enter BLE pairing to join WiFi.
-    if (HasHomeWifi()) {
-      return ScreenName::Main;
-    }
-    RobotInterface::SendAnimToEngine(SwitchboardInterface::EnterPairing());
-    return ScreenName::Pairing;
-  };
-  ADD_MENU_ITEM(WifiViaBle, "EXIT", Main);
-  ADD_MENU_ITEM_WITH_ACTION(WifiViaBle, "CONFIRM", confirmWifiBle);
-
-  FaceInfoScreen::MenuItemAction confirmWifiHotspot = []() {
-    ApplyHotspotWifiMode();
-    RobotInterface::SendAnimToEngine(SwitchboardInterface::ExitPairing());
-    return ScreenName::Main;
-  };
-  ADD_MENU_ITEM(WifiViaHotspot, "EXIT", Main);
-  ADD_MENU_ITEM_WITH_ACTION(WifiViaHotspot, "CONFIRM", confirmWifiHotspot);
 
 
   // === Network screen ===
@@ -612,7 +456,6 @@ void FaceInfoScreenManager::Init(Anim::AnimContext* context, Anim::AnimationStre
     SET_EXIT_ACTION(ToF, exitToFScreen);
   }
 
-  RebuildMainMenu();
   
   // Check if we booted in recovery mode
   if (OSState::getInstance()->IsInRecoveryMode()) {
@@ -1184,6 +1027,8 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
                       singlePressDetected, 
                       doublePressDetected);
 
+  const bool isOnCharger = static_cast<bool>(state.status & (uint32_t)RobotStatusFlag::IS_ON_CHARGER);
+
   const ScreenName currScreenName = GetCurrScreenName();
 
   if (singlePressDetected && _engineLoaded) {
@@ -1201,8 +1046,11 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
     }
   }
 
-  // BLE pairing: double backpack press, on or off charger (WireOS: mute-on-double-press removed).
-  if (doublePressDetected &&
+  // Check for conditions to enter BLE pairing mode
+  if (doublePressDetected && 
+      isOnCharger &&
+      // Only enter pairing from these three screens which include
+      // screens that are normally active during playpen test
       CanEnterPairingFromScreen(currScreenName)) {
     LOG_INFO("FaceInfoScreenManager.ProcessMenuNavigation.GotDoublePress", "Entering pairing");
     RobotInterface::SendAnimToEngine(SwitchboardInterface::EnterPairing());
@@ -1212,6 +1060,13 @@ void FaceInfoScreenManager::ProcessMenuNavigation(const RobotState& state)
                   "Remove FORCE_TRANSITION_TO_PAIRING when switchboard is working");
       SetScreen(ScreenName::Pairing);
     }
+  }
+  else if(doublePressDetected &&
+          !isOnCharger && // while user-facing instructions may say "pick up the robot and double press," it's really just off charger
+          _engineLoaded &&
+          CanEnterPairingFromScreen(currScreenName))
+  {
+    ToggleMute("DOUBLE_PRESS");
   }
 
   // Check for button press to go to next debug screen
@@ -1406,46 +1261,8 @@ void FaceInfoScreenManager::Update(const RobotState& state)
   }
 }
 
-bool FaceInfoScreenManager::RebuildMainMenu()
-{
-  uint8_t mode = 1; // home wifi — still allow preference toggle (no AP yet)
-  if (!HasHomeWifiCached()) {
-    mode = IsSetupAPOn() ? 2 : 3; // hotspot → offer BLE; else offer hotspot
-  }
-  // Include preferred setup method so web/:80/:8080 changes refresh the face menu.
-  const uint8_t prefer = PreferBleWifiMode() ? 1 : 2;
-  const uint16_t menuKey = static_cast<uint16_t>(mode) | (static_cast<uint16_t>(prefer) << 8);
-  if (menuKey == _mainWifiMenuMode) {
-    return false;
-  }
-  _mainWifiMenuMode = menuKey;
-
-  auto* main = GetScreen(ScreenName::Main);
-  main->ClearMenuItems();
-  main->AppendMenuItem("EXIT", ScreenName::None);
-
-  if (mode == 1) {
-    // Online: replace former SELF TEST with BLE↔Hotspot preference switch.
-    // Choosing Hotspot only saves mode — AP rises when WiFi is lost later.
-    if (PreferBleWifiMode()) {
-      main->AppendMenuItem("WIFI HOTSPOT", ScreenName::WifiViaHotspot);
-    } else {
-      main->AppendMenuItem("WIFI BY BLUE", ScreenName::WifiViaBle);
-    }
-  } else if (mode == 2) {
-    main->AppendMenuItem("WIFI BY BLUE", ScreenName::WifiViaBle);
-  } else {
-    main->AppendMenuItem("WIFI HOTSPOT", ScreenName::WifiViaHotspot);
-  }
-
-  main->AppendMenuItem(IsXray() ? "CLEAR" : "CLEAR OUT SOUL", ScreenName::ClearUserData);
-  return true;
-}
-
 void FaceInfoScreenManager::DrawMain()
 {
-  RebuildMainMenu();
-
   auto *osstate = OSState::getInstance();
 
   std::string esn = osstate->GetSerialNumberAsString();

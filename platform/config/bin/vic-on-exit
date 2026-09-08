@@ -33,43 +33,9 @@ function exit_clean ()
     exit 0
 }
 
-# WireOS-only: after CLEAR OUT SOUL, vic-cloud often exits once while offline
-# (wiped tokens / no home WiFi). ExecStopPost then flashes fault 923 and
-# fault-code-handler restarts the stack — stock clear does not show this.
-# Suppress 923 only on WireOS robots (persist/data wifi-setup-mode) during
-# setup AP or when no ConnMan WiFi has been saved yet. Stock images lack
-# those paths → behavior unchanged. Real cloud crashes after WiFi is saved
-# still raise 923.
-function wireos_suppress_cloud_fault_923 ()
-{
-    [ "${VIC_ONFAILURE_FAULTCODE}" = "923" ] || return 1
-    if [ ! -f /persist/wired/wifi-setup-mode ] && \
-       [ ! -f /data/wired/wifi-setup-mode ] && \
-       [ ! -f /run/wireos-wifi-setup-mode ]; then
-        return 1
-    fi
-    if [ -e /run/wireos-setup-ap ] || [ -e /run/wireos-wifi-boot-wait ] || \
-       [ -e /run/wireos-force-ap ] || [ -e /run/wireos-wifi-hold-ap ] || \
-       [ -e /run/wireos-wifi-trying ]; then
-        return 0
-    fi
-    # Post-clear / never provisioned: no ConnMan wifi_* favorites yet.
-    if [ ! -d /data/lib/connman ]; then
-        return 0
-    fi
-    set -- /data/lib/connman/wifi_*
-    if [ ! -e "$1" ]; then
-        return 0
-    fi
-    return 1
-}
-
 function exit_error ()
 {
     if [ "${VIC_ONFAILURE_FAULTCODE}" != "0" ]; then
-        if wireos_suppress_cloud_fault_923; then
-            exit_clean
-        fi
         if [ ! -e /run/fault_code.pending ]; then
             echo ${VIC_ONFAILURE_FAULTCODE} > /run/fault_code
         fi

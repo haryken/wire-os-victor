@@ -151,7 +151,8 @@ private:
                            bool& singlePressDetected, 
                            bool& doublePressDetected);
   
-  // Returns true if screenName is one of the screens that allow BLE pairing on double backpack press
+  // Returns true if screenName is one of the screens that allow the user to enter pairing when
+  // double pressing the backpack and on the charger
   bool CanEnterPairingFromScreen( const ScreenName& screenName) const;
   
   // Returns true if screenName is an Alexa screen
@@ -181,9 +182,6 @@ private:
   // Internal draw functions that
   void DrawFAC();
   void DrawMain();
-  // Rebuild EXIT / wifi-toggle / CLEAR on Main. True if the menu changed.
-  bool RebuildMainMenu();
-  uint16_t _mainWifiMenuMode = 0;
   void DrawNetwork();
   void DrawSensorInfo(const RobotState& state);
   void DrawBuildInfo();

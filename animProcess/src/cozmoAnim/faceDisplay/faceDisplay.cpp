@@ -16,18 +16,10 @@
 #include "cozmoAnim/faceDisplay/faceInfoScreenManager.h"
 #include "coretech/common/shared/array2d.h"
 #include "coretech/vision/engine/image.h"
-#include "coretech/common/engine/colorRGBA.h"
 #include "util/console/consoleInterface.h"
 #include "util/cpuProfiler/cpuProfiler.h"
 #include "util/threading/threadPriority.h"
 #include "cozmoAnim/execCommand/exec_command.h"
-#include "util/fileUtils/fileUtils.h"
-#include "anki/cozmo/shared/cozmoConfig.h"
-
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <string>
 
 #define LOG_CHANNEL "FaceDisplay"
 
@@ -65,99 +57,7 @@ namespace {
 
   CONSOLE_FUNC(SetFaceBrightness, "FaceDisplay", int val);
 #endif
-
-  enum class WireosWifiFace : uint8_t { None, Trying, Ok, Fail };
-
-  static uint64_t WireosNowMs()
-  {
-    using namespace std::chrono;
-    return static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-  }
-
-  static WireosWifiFace ReadWireosWifiFace()
-  {
-    static WireosWifiFace cached = WireosWifiFace::None;
-    static uint64_t lastRead = 0;
-    const uint64_t now = WireosNowMs();
-    if (lastRead != 0 && (now - lastRead) < 400) {
-      return cached;
-    }
-    lastRead = now;
-    const char* kPath = "/run/wireos-wifi-face";
-    if (!Util::FileUtils::FileExists(kPath)) {
-      cached = WireosWifiFace::None;
-      return cached;
-    }
-    std::string s = Util::FileUtils::ReadFile(kPath);
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
-      s.erase(s.begin());
-    }
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
-      s.pop_back();
-    }
-    if (s == "trying" || s == "accepted") {
-      cached = WireosWifiFace::Trying;
-    } else if (s == "ok") {
-      cached = WireosWifiFace::Ok;
-    } else if (s == "fail") {
-      cached = WireosWifiFace::Fail;
-    } else {
-      cached = WireosWifiFace::None;
-    }
-    return cached;
-  }
-
-  static void DrawWifiArc(Vision::ImageRGB565& img, const Point2f& c, f32 r, const ColorRGBA& color, s32 thick)
-  {
-    Point2f prev;
-    bool have = false;
-    for (int deg = 200; deg <= 340; deg += 10) {
-      const f32 rad = static_cast<f32>(deg) * 3.14159265f / 180.f;
-      const Point2f p(c.x() + r * std::cos(rad), c.y() + r * std::sin(rad));
-      if (have) {
-        img.DrawLine(prev, p, color, thick);
-      }
-      prev = p;
-      have = true;
-    }
-  }
-
-  static void DrawWireosWifiOverlay(Vision::ImageRGB565& img)
-  {
-    const WireosWifiFace st = ReadWireosWifiFace();
-    if (st == WireosWifiFace::None) {
-      return;
-    }
-
-    const ColorRGBA cyan(0.40f, 0.91f, 0.97f);
-    const ColorRGBA green(0.13f, 0.77f, 0.37f);
-    const ColorRGBA red(0.94f, 0.27f, 0.27f);
-
-    const f32 ox = static_cast<f32>(FACE_DISPLAY_WIDTH) - 34.f;
-    const f32 oy = 2.f;
-    const Point2f origin(ox + 13.f, oy + 20.f);
-
-    bool drawOuter = true;
-    if (st == WireosWifiFace::Trying) {
-      drawOuter = ((WireosNowMs() / 400) % 2) == 0;
-    }
-    if (drawOuter) {
-      DrawWifiArc(img, origin, 14.f, cyan, 2);
-    }
-    DrawWifiArc(img, origin, 9.f, cyan, 2);
-    DrawWifiArc(img, origin, 5.f, cyan, 2);
-    img.DrawFilledCircle(origin, cyan, 2);
-
-    if (st == WireosWifiFace::Ok) {
-      img.DrawLine({ox + 17.f, oy + 16.f}, {ox + 21.f, oy + 21.f}, green, 2);
-      img.DrawLine({ox + 21.f, oy + 21.f}, {ox + 31.f, oy + 9.f}, green, 2);
-    } else if (st == WireosWifiFace::Fail) {
-      img.DrawLine({ox + 17.f, oy + 8.f}, {ox + 29.f, oy + 20.f}, red, 2);
-      img.DrawLine({ox + 29.f, oy + 8.f}, {ox + 17.f, oy + 20.f}, red, 2);
-    }
-  }
 }
-
   
 FaceDisplay::FaceDisplay()
 : _stopDrawFace(false)
@@ -256,7 +156,6 @@ void FaceDisplay::DrawToFaceInternal(const Vision::ImageRGB565& img)
     std::lock_guard<std::mutex> lock(_faceDrawMutex);
     UpdateNextImgPtr();
     img.CopyTo(*_faceDrawNextImg);
-    DrawWireosWifiOverlay(*_faceDrawNextImg);
   }
 
   // Notify the face-drawing thread that there is a face to draw

@@ -100,12 +100,6 @@ void FaceInfoScreen::AppendMenuItem(const std::string& text, MenuItemAction acti
   _menu.emplace_back(text, action);
 }
 
-void FaceInfoScreen::ClearMenuItems()
-{
-  _menu.clear();
-  _menuCursor = 0;
-}
-
 void FaceInfoScreen::DrawMenuVertical(Vision::ImageRGB565& img) const
 {
   const ColorRGBA& menuBgColor = NamedColors::BLACK;
