@@ -14,12 +14,22 @@
 #include "cozmoAnim/faceDisplay/faceDisplay.h"
 #include "cozmoAnim/faceDisplay/faceDisplayImpl.h"
 #include "cozmoAnim/faceDisplay/faceInfoScreenManager.h"
+#include "coretech/common/engine/colorRGBA.h"
 #include "coretech/common/shared/array2d.h"
 #include "coretech/vision/engine/image.h"
+#include "anki/cozmo/shared/cozmoConfig.h"
 #include "util/console/consoleInterface.h"
 #include "util/cpuProfiler/cpuProfiler.h"
+#include "util/fileUtils/fileUtils.h"
 #include "util/threading/threadPriority.h"
 #include "cozmoAnim/execCommand/exec_command.h"
+
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <poll.h>
+#include <sys/inotify.h>
+#include <unistd.h>
 
 #define LOG_CHANNEL "FaceDisplay"
 
@@ -57,10 +67,87 @@ namespace {
 
   CONSOLE_FUNC(SetFaceBrightness, "FaceDisplay", int val);
 #endif
+
+  enum class WireosWifiFace : uint8_t { None, Trying, Ok, Fail };
+  const char* kWireosWifiFacePath = "/run/wireos-wifi-face";
+
+  uint8_t ReadWireosWifiFace()
+  {
+    std::string state = Util::FileUtils::ReadFile(kWireosWifiFacePath);
+    if (state.find("trying") == 0 || state.find("accepted") == 0) {
+      return static_cast<uint8_t>(WireosWifiFace::Trying);
+    }
+    if (state.find("ok") == 0) {
+      return static_cast<uint8_t>(WireosWifiFace::Ok);
+    }
+    if (state.find("fail") == 0) {
+      return static_cast<uint8_t>(WireosWifiFace::Fail);
+    }
+    return static_cast<uint8_t>(WireosWifiFace::None);
+  }
+
+  uint64_t WireosNowMs()
+  {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(duration_cast<milliseconds>(
+      steady_clock::now().time_since_epoch()).count());
+  }
+
+  void DrawWifiArc(Vision::ImageRGB565& img,
+                   const Point2f& center,
+                   f32 radius,
+                   const ColorRGBA& color,
+                   s32 thickness)
+  {
+    Point2f previous;
+    bool havePrevious = false;
+    for (int degrees = 200; degrees <= 340; degrees += 10) {
+      const f32 radians = static_cast<f32>(degrees) * 3.14159265f / 180.f;
+      const Point2f point(center.x() + radius * std::cos(radians),
+                          center.y() + radius * std::sin(radians));
+      if (havePrevious) {
+        img.DrawLine(previous, point, color, thickness);
+      }
+      previous = point;
+      havePrevious = true;
+    }
+  }
+
+  void DrawWireosWifiOverlay(Vision::ImageRGB565& img, uint8_t rawState)
+  {
+    const auto state = static_cast<WireosWifiFace>(rawState);
+    if (state == WireosWifiFace::None) {
+      return;
+    }
+
+    const ColorRGBA cyan(0.40f, 0.91f, 0.97f);
+    const ColorRGBA green(0.13f, 0.77f, 0.37f);
+    const ColorRGBA red(0.94f, 0.27f, 0.27f);
+    const f32 originX = static_cast<f32>(FACE_DISPLAY_WIDTH) - 21.f;
+    const f32 originY = 22.f;
+    const Point2f origin(originX, originY);
+
+    if (state != WireosWifiFace::Trying || ((WireosNowMs() / 400) % 2) == 0) {
+      DrawWifiArc(img, origin, 14.f, cyan, 2);
+    }
+    DrawWifiArc(img, origin, 9.f, cyan, 2);
+    DrawWifiArc(img, origin, 5.f, cyan, 2);
+    img.DrawFilledCircle(origin, cyan, 2);
+
+    if (state == WireosWifiFace::Ok) {
+      img.DrawLine({originX + 4.f, 18.f}, {originX + 8.f, 23.f}, green, 2);
+      img.DrawLine({originX + 8.f, 23.f}, {originX + 18.f, 11.f}, green, 2);
+    } else if (state == WireosWifiFace::Fail) {
+      img.DrawLine({originX + 4.f, 10.f}, {originX + 16.f, 22.f}, red, 2);
+      img.DrawLine({originX + 16.f, 10.f}, {originX + 4.f, 22.f}, red, 2);
+    }
+  }
 }
   
 FaceDisplay::FaceDisplay()
 : _stopDrawFace(false)
+, _stopWifiFaceWatch(false)
+, _wifiFaceState(static_cast<uint8_t>(WireosWifiFace::None))
 , _readyFace(false)
 , _stopBootAnim(false)
 {
@@ -81,6 +168,7 @@ FaceDisplay::FaceDisplay()
   _faceDrawImg[1].reset(new Vision::ImageRGB565());
   _faceDrawImg[1]->Allocate(FACE_DISPLAY_HEIGHT, FACE_DISPLAY_WIDTH);
   _faceDrawThread = std::thread(&FaceDisplay::DrawFaceLoop, this);
+  _wifiFaceWatchThread = std::thread(&FaceDisplay::WifiFaceWatchLoop, this);
 }
 
 FaceDisplay::~FaceDisplay()
@@ -88,6 +176,11 @@ FaceDisplay::~FaceDisplay()
 #if REMOTE_CONSOLE_ENABLED
   sDisplayImpl = nullptr;
 #endif
+
+  _stopWifiFaceWatch = true;
+  if (_wifiFaceWatchThread.joinable()) {
+    _wifiFaceWatchThread.join();
+  }
 
   _stopDrawFace = true;
   {
@@ -156,6 +249,7 @@ void FaceDisplay::DrawToFaceInternal(const Vision::ImageRGB565& img)
     std::lock_guard<std::mutex> lock(_faceDrawMutex);
     UpdateNextImgPtr();
     img.CopyTo(*_faceDrawNextImg);
+    DrawWireosWifiOverlay(*_faceDrawNextImg, _wifiFaceState.load(std::memory_order_relaxed));
   }
 
   // Notify the face-drawing thread that there is a face to draw
@@ -164,6 +258,50 @@ void FaceDisplay::DrawToFaceInternal(const Vision::ImageRGB565& img)
     _readyFace = true;
   }
   _readyCondition.notify_all();
+}
+
+void FaceDisplay::WifiFaceWatchLoop()
+{
+  Anki::Util::SetThreadName(pthread_self(), "WifiFaceWatch");
+  _wifiFaceState.store(ReadWireosWifiFace(), std::memory_order_relaxed);
+
+  const int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+  int watch = -1;
+  if (fd >= 0) {
+    watch = inotify_add_watch(fd, "/run",
+      IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+  }
+
+  while (!_stopWifiFaceWatch) {
+    bool refresh = (fd < 0 || watch < 0);
+    if (!refresh) {
+      pollfd descriptor{fd, POLLIN, 0};
+      const int ready = poll(&descriptor, 1, 500);
+      if (ready > 0 && (descriptor.revents & POLLIN)) {
+        alignas(inotify_event) char events[1024];
+        const ssize_t count = read(fd, events, sizeof(events));
+        for (ssize_t offset = 0; offset < count;) {
+          const auto* event = reinterpret_cast<const inotify_event*>(events + offset);
+          if (event->len > 0 && std::strcmp(event->name, "wireos-wifi-face") == 0) {
+            refresh = true;
+          }
+          offset += sizeof(inotify_event) + event->len;
+        }
+      }
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    if (refresh) {
+      _wifiFaceState.store(ReadWireosWifiFace(), std::memory_order_relaxed);
+    }
+  }
+
+  if (watch >= 0) {
+    inotify_rm_watch(fd, watch);
+  }
+  if (fd >= 0) {
+    close(fd);
+  }
 }
 
 void FaceDisplay::DrawFaceLoop()

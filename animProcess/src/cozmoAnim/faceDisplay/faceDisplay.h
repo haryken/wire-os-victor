@@ -65,6 +65,12 @@ private:
   std::mutex                            _faceDrawMutex;
   std::atomic<bool>                     _stopDrawFace;
 
+  // WiFi status is watched outside the render loop. Drawing only reads this
+  // atomic byte, so captive-portal I/O cannot stall vic-anim frame delivery.
+  std::thread                           _wifiFaceWatchThread;
+  std::atomic<bool>                     _stopWifiFaceWatch;
+  std::atomic<uint8_t>                  _wifiFaceState;
+
   std::mutex                            _readyMutex;
   std::condition_variable               _readyCondition;
   bool                                  _readyFace;
@@ -74,6 +80,7 @@ private:
   std::atomic<bool> _stopBootAnim;
   
   void DrawFaceLoop();
+  void WifiFaceWatchLoop();
   void UpdateNextImgPtr();
 }; // class FaceDisplay
 

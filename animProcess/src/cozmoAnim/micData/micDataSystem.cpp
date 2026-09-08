@@ -365,6 +365,23 @@ void MicDataSystem::RecordAudioInternal(uint32_t duration_ms, const std::string&
 
 void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
 {
+  // Pairing and Customer Care own the face/behavior tracks. A relisten armed
+  // while the user exits those screens must wait until the normal face has
+  // been restored for a short grace period; otherwise FakeTriggerWord starts
+  // anim_wakeword_getin_01 against stale pairing track locks and can leave the
+  // trigger pending with a blank face.
+  static BaseStationTime_t sNormalFaceSince_ns = 0;
+  const bool normalFace =
+    FaceInfoScreenManager::getInstance()->GetCurrScreenName() == ScreenName::None;
+  if (normalFace) {
+    if (sNormalFaceSince_ns == 0) {
+      sNormalFaceSince_ns = currTime_nanosec;
+    }
+  } else {
+    sNormalFaceSince_ns = 0;
+  }
+  constexpr BaseStationTime_t kRelistenAfterControlScreenGrace_ns = 2'000'000'000ULL;
+
   // Xiaozhi continuous conversation: cloud arms /run/vic-cloud/xiaozhi-relisten after TTS.
   {
     static const char* kRelisten = "/run/vic-cloud/xiaozhi-relisten";
@@ -378,7 +395,17 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
     if (relisten != nullptr) {
       static const char* kBusy = "/run/vic-cloud/xiaozhi-busy";
       static const char* kBusyLegacy = "/run/xiaozhi-busy";
-      if (access(kBusy, F_OK) == 0 || access(kBusyLegacy, F_OK) == 0) {
+      const bool faceReady = normalFace &&
+        sNormalFaceSince_ns != 0 &&
+        currTime_nanosec >= sNormalFaceSince_ns &&
+        (currTime_nanosec - sNormalFaceSince_ns) >= kRelistenAfterControlScreenGrace_ns;
+      if (!faceReady) {
+        static uint32_t sFaceDeferLog = 0;
+        if ((++sFaceDeferLog % 60) == 1) {
+          LOG_INFO("MicDataSystem.Update.XiaozhiRelistenControlScreenDeferred",
+                   "Deferring FakeTriggerWord until normal face is stable");
+        }
+      } else if (access(kBusy, F_OK) == 0 || access(kBusyLegacy, F_OK) == 0) {
         static uint32_t sDeferLog = 0;
         if ((++sDeferLog % 60) == 1) {
           LOG_INFO("MicDataSystem.Update.XiaozhiRelistenDeferred",
