@@ -85,8 +85,12 @@ namespace {
 
   // The maximum amount of time that can elapse in between
   // receipt of RobotState messages before the anim process
-  // considers the robot process to have disconnected
-  const float kNoRobotStateDisconnectTimeout_sec = 2.f;
+  // considers the robot process to have disconnected. Two seconds is too
+  // aggressive during boot/load spikes: robot comms can reconnect just after
+  // that boundary and still trigger the fatal NO_ROBOT_COMMS recovery path.
+  const float kNoRobotStateDisconnectTimeout_sec = 5.f;
+  const float kRobotReconnectRetryPeriod_sec = 0.5f;
+  const float kNoRobotCommsFaultTimeout_sec = 15.f;
   float _pendingRobotDisconnectTime_sec = -1.f;
 
   // Whether or not engine has finished loading and is ready to do things
@@ -927,15 +931,40 @@ Result AnimProcessMessages::Update(BaseStationTime_t currTime_nanosec)
     _connectionFlowInited = InitConnectionFlow(_animStreamer);
   }
 
+  const float now_sec = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
+  static float robotDisconnectedSince_sec = -1.f;
+  static float nextRobotReconnectTime_sec = 0.f;
+  static bool robotFaultCodeDisplayed = false;
+
   if (!AnimComms::IsConnectedToRobot()) {
-    static bool faultCodeDisplayed = false;
-    if (!faultCodeDisplayed) {
+    if (robotDisconnectedSince_sec < 0.f) {
+      robotDisconnectedSince_sec = now_sec;
+      nextRobotReconnectTime_sec = now_sec;
+    }
+
+    if (now_sec >= nextRobotReconnectTime_sec) {
+      if (AnimComms::InitRobotComms() == RESULT_OK) {
+        LOG_INFO("AnimProcessMessages.Update.RobotReconnected", "");
+        _pendingRobotDisconnectTime_sec = now_sec + kNoRobotStateDisconnectTimeout_sec;
+        robotDisconnectedSince_sec = -1.f;
+        nextRobotReconnectTime_sec = 0.f;
+        robotFaultCodeDisplayed = false;
+      } else {
+        nextRobotReconnectTime_sec = now_sec + kRobotReconnectRetryPeriod_sec;
+      }
+    }
+
+    // A transient local socket failure is recoverable. Only escalate to the
+    // fault handler if reconnecting has genuinely failed for an extended time.
+    if (!AnimComms::IsConnectedToRobot() &&
+        !robotFaultCodeDisplayed &&
+        (now_sec - robotDisconnectedSince_sec) >= kNoRobotCommsFaultTimeout_sec) {
       LOG_WARNING("AnimProcessMessages.Update.NoConnectionToRobot", "");
       FaultCode::DisplayFaultCode(FaultCode::NO_ROBOT_COMMS);
-      faultCodeDisplayed = true;
+      robotFaultCodeDisplayed = true;
     }
   } else if ((_pendingRobotDisconnectTime_sec > 0.f) &&
-      (BaseStationTimer::getInstance()->GetCurrentTimeInSeconds() > _pendingRobotDisconnectTime_sec)) {
+      (now_sec > _pendingRobotDisconnectTime_sec)) {
     // Disconnect robot if it hasn't been heard from in a while
     LOG_WARNING("AnimProcessMessages.Update.RobotStateTimeout", "Disconnecting robot");
     AnimComms::DisconnectRobot();

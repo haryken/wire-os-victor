@@ -140,8 +140,8 @@ namespace {
   const char* kForceAPFlag = "/run/wireos-force-ap";
   const char* kBootWaitFlag = "/run/wireos-wifi-boot-wait";
   const char* kWifiSetupModeFile = "/data/wired/wifi-setup-mode";
-  // Survives Clear User Data. /persist is often on RO rootfs — engine cannot
-  // write it; wired (root) remounts + writes via the mode API.
+  // Survives Clear User Data. Only wired reads /data and /persist during
+  // normal operation; the realtime anim process consumes the /run mirror.
   const char* kWifiSetupModePersist = "/persist/wired/wifi-setup-mode";
   const char* kWifiSetupModeRun = "/run/wireos-wifi-setup-mode";
   const char* kOpenAPIP = "192.168.4.1";
@@ -194,11 +194,11 @@ namespace {
     gHomeWifiCacheTime_sec = -1000.f;
   }
 
-  // Stamp /run + /data immediately; mirror to /persist via wired without blocking anim.
+  // Stamp the tmpfs mirror immediately; let wired persist it off the realtime
+  // anim thread.
   void PersistWifiSetupMode(const char* mode) {
     const std::string line = std::string(mode) + "\n";
     Util::FileUtils::WriteFile(kWifiSetupModeRun, line);
-    Util::FileUtils::WriteFile(kWifiSetupModeFile, line);
     InvalidateWifiFaceCache();
     // Background only — never system(curl) sync on the anim thread (blocks → 917).
     const std::string cmd =
@@ -225,18 +225,16 @@ namespace {
       return gPreferBleCached;
     }
     gWifiModeCacheTime_sec = now;
-    // /run → /data → /persist (avoid stale RO /persist saying ble forever).
-    const char* paths[] = {kWifiSetupModeRun, kWifiSetupModeFile, kWifiSetupModePersist};
-    for (const char* p : paths) {
-      const std::string raw = Util::FileUtils::ReadFile(p);
-      if (ModeTextIsHotspot(raw)) {
-        gPreferBleCached = false;
-        return false;
-      }
-      if (ModeTextIsBle(raw)) {
-        gPreferBleCached = true;
-        return true;
-      }
+    // wired mirrors the persisted choice into /run during startup. Never read
+    // flash-backed /data or /persist from the realtime animation loop.
+    const std::string raw = Util::FileUtils::ReadFile(kWifiSetupModeRun);
+    if (ModeTextIsHotspot(raw)) {
+      gPreferBleCached = false;
+      return false;
+    }
+    if (ModeTextIsBle(raw)) {
+      gPreferBleCached = true;
+      return true;
     }
     gPreferBleCached = true; // default BLE
     return gPreferBleCached;
@@ -1355,9 +1353,6 @@ void FaceInfoScreenManager::Update(const RobotState& state)
   switch(currScreenName) {
     case ScreenName::Main:
     {
-      if (RebuildMainMenu()) {
-        DrawMain();
-      }
       static float lastTime = 0;
       const float now = BaseStationTimer::getInstance()->GetCurrentTimeInSeconds();
       if ( (now - lastTime) > kIPCheckPeriod_sec ) {
