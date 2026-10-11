@@ -175,6 +175,7 @@ private:
 #endif
   size_t _streamingAudioIndex = 0;   // index into current MicDataInfo buffer (0 after A1 trim)
   size_t _streamingChunksSent = 0;   // cumulative chunks sent this stream (timeout / duration)
+  bool _xiaozhiVadStream = false;    // latched at stream start from kXiaozhiListenVadFlagPath
   BaseStationTime_t _lastMicJobProbe_ns = 0; // WireOS TEMP: MicJobProbe interval
   Util::Locale _locale = {"en", "US"};
   std::string _timeZone = "";

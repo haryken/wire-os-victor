@@ -35,6 +35,10 @@ namespace MicData {
   static constexpr uint32_t kTriggerAudioLengthDebug_ms     = 1500; // We only hold onto more audio for FP testing during development
   static constexpr uint32_t kTriggerAudioLengthShipping_ms  = 750;
   static constexpr uint32_t kStreamingTimeout_ms            = 6000 + kTriggerOverlapSize_ms;
+  // WireOS: vic-cloud creates this file while Xiaozhi listen_mode is "vad". The mic then
+  // stays open until vic-cloud sends stopSignal (server STT), capped at this timeout.
+  static constexpr const char* kXiaozhiListenVadFlagPath    = "/run/vic-cloud/xiaozhi-listen-vad";
+  static constexpr uint32_t kXiaozhiVadStreamingTimeout_ms  = 30000 + kTriggerOverlapSize_ms;
   static constexpr uint32_t kStreamingDefaultMinDuration_ms = 4000;
   static constexpr uint32_t kRawAudioPerBuffer_ms           = 1000;
 

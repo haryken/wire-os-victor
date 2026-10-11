@@ -574,6 +574,10 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
         _streamingComplete = ShouldSimulateStreaming();
         _streamingAudioIndex = 0;
         _streamingChunksSent = 0;
+        // Blackjack prompts are local Vosk and keep the stock window.
+        _xiaozhiVadStream = (_currentStreamingJob != nullptr) &&
+                            (_currentStreamingJob->_type == CloudMic::StreamType::Normal) &&
+                            (access(kXiaozhiListenVadFlagPath, F_OK) == 0);
 
         // even though this isn't necessarily the exact frame the backpack lights begin (since that's done in a different
         // thread), it doesn't make a noticeable difference since this is an arbitrary number and doesn't need to be precise
@@ -590,7 +594,8 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
           LOG_WARNING("MicDataSystem.Update.StreamingStart.Simulated",
                       "Hotword sent but streaming is SIMULATED (no Audio) — Xiaozhi STT will fail");
         } else {
-          LOG_INFO("MicDataSystem.Update.StreamingStart", "Real mic stream to cloud");
+          LOG_INFO("MicDataSystem.Update.StreamingStart", "Real mic stream to cloud (%s)",
+                   _xiaozhiVadStream ? "xiaozhi vad, until stopSignal" : "fixed window");
         }
       }
       else
@@ -611,7 +616,9 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
       if (!_streamingComplete)
       {
         static constexpr size_t kMaxRecordNumChunks = (kStreamingTimeout_ms / kTimePerChunk_ms) + 1;
-        const bool didTimeout = _streamingChunksSent >= kMaxRecordNumChunks;
+        static constexpr size_t kXiaozhiVadMaxRecordNumChunks = (kXiaozhiVadStreamingTimeout_ms / kTimePerChunk_ms) + 1;
+        const size_t maxRecordNumChunks = _xiaozhiVadStream ? kXiaozhiVadMaxRecordNumChunks : kMaxRecordNumChunks;
+        const bool didTimeout = _streamingChunksSent >= maxRecordNumChunks;
         if (receivedStopMessage || didTimeout)
         {
           _streamingComplete = true;

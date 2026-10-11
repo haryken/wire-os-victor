@@ -49,6 +49,8 @@
 
 #include "coretech/common/engine/utils/timer.h"
 
+#include <unistd.h>
+
 
 #define DEBUG_TRIGGER_WORD_VERBOSE 0 // add some verbose debugging if trying to track down issues
 
@@ -97,6 +99,8 @@ namespace {
   CONSOLE_VAR_RANGED( float, kMinListeningTimeout_s, CONSOLE_GROUP, 5.0f, 0.0f, 30.0f );
   // this is the maximum duration we'll wait from streaming begin
   CONSOLE_VAR_RANGED( float, kMaxStreamingDuration_s, CONSOLE_GROUP, 10.0f, 0.0f, 20.0f );
+  // Xiaozhi "vad" listen: same 4s gap the stock 6s mic / 10s listen caps leave for the intent
+  constexpr double kXiaozhiVadIntentMargin_s = 4.0;
 
 
   // when our streaming begins/ends there is a high chance that we will record some non-intent sound, these
@@ -1168,6 +1172,11 @@ bool BehaviorReactToVoiceCommand::IsTurnEnabled() const
 double BehaviorReactToVoiceCommand::GetStreamingDuration() const
 {
   // our streaming duration is how long after streaming begins do we wait for an intent
+  if ( access( MicData::kXiaozhiListenVadFlagPath, F_OK ) == 0 )
+  {
+    // anim keeps the mic open up to kXiaozhiVadStreamingTimeout_ms; leave time for the intent
+    return ( MicData::kXiaozhiVadStreamingTimeout_ms / 1000.0 ) + kXiaozhiVadIntentMargin_s;
+  }
   return kMaxStreamingDuration_s;
 }
 
