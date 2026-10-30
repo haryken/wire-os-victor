@@ -37,8 +37,12 @@
 #include "util/math/math.h"
 #include "util/threading/threadPriority.h"
 #include "clad/robotInterface/messageRobotToEngine_sendAnimToEngine_helper.h"
+#include <atomic>
+#include <cmath>
+#include <ctime>
 #include <list>
 #include <sched.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -223,15 +227,65 @@ void MicDataProcessor::GetLatestMicDirectionData(MicDirectionData& out_lastSampl
   out_dominantDirection = _micImmediateDirection->GetDominantDirection();
 }
   
+void MicDataProcessor::StartOpenMic()
+{
+  if (_micDataSystem->IsMicMuted()) {
+    return;
+  }
+  if (_micDataSystem->HasStreamingJob()) {
+    return;
+  }
+  static std::atomic<bool> sPending{false};
+  if (sPending.exchange(true)) {
+    return;
+  }
+
+  _micDataSystem->SetWillStream(true);
+  auto openJob = [this](bool) {
+    sPending.store(false);
+    if (_micDataSystem->HasStreamingJob()) {
+      return;
+    }
+    _micDataSystem->MarkOpenMicStream();
+    // 400 ms pre-roll keeps the start of the word. The immediate buffer holds 750 ms.
+    CreateStreamJob(CloudMic::StreamType::Normal, 400);
+    LOG_INFO("MicDataProcessor.OpenMic",
+             "Mic open after ting — no standing listen, robot keeps walking");
+  };
+
+  ShowAudioStreamStateManager* show = _context->GetShowAudioStreamStateManager();
+  if (show != nullptr && show->HasValidTriggerResponse()) {
+    show->SetPendingTriggerResponseWithoutGetIn(openJob);
+    LOG_INFO("MicDataProcessor.OpenMic", "Ting armed, backpack cyan, no engine listen");
+    return;
+  }
+  LOG_INFO("MicDataProcessor.OpenMic", "No ting available — opening the mic anyway");
+  openJob(true);
+}
+
 void MicDataProcessor::TriggerWordDetectCallback(TriggerWordDetectSource source,
                                                  const AudioUtil::SpeechRecognizerCallbackInfo& info)
 {
+  // Open mode: chime and cyan only. triggerWordDetected would freeze Vector
+  // in BehaviorReactToVoiceCommand.
+  if (access(kXiaozhiOpenMicModePath, F_OK) == 0) {
+    StartOpenMic();
+    return;
+  }
+
   ShowAudioStreamStateManager* showStreamState = _context->GetShowAudioStreamStateManager();
-  // Ignore extra triggers during streaming
-  if (_micDataSystem->HasStreamingJob() || !showStreamState->HasValidTriggerResponse())
+  // No wake response is set up: leave an ambient stream alone.
+  if (!showStreamState->HasValidTriggerResponse())
   {
     return;
   }
+  // Ignore extra triggers during a real listen. An ambient (walking) stream
+  // is stopped so Hey Vector can enter the standing listen once.
+  if (_micDataSystem->HasStreamingJob() && !_micDataSystem->ReleaseAmbientStreamForWake())
+  {
+    return;
+  }
+  _micDataSystem->SetOfficialListen(true);
   
   // By the time the earcon completes, engine may have changed its response, so assume the decision to stream
   // should be based on the engine-requested state at the time of the trigger word callback. Ugh.
@@ -249,6 +303,7 @@ void MicDataProcessor::TriggerWordDetectCallback(TriggerWordDetectSource source,
       // since we're not opening up a stream, we need to reset the streaming light since it get's turned on
       // when we hear the trigger word
       _micDataSystem->SetWillStream(false);
+      _micDataSystem->SetOfficialListen(false);
       LOG_WARNING("MicDataProcessor.TWCallback", "Don't have a wake word response setup");
     }
   };
@@ -732,6 +787,68 @@ void MicDataProcessor::ProcessRawLoop()
   }
 }
 
+void MicDataProcessor::MaybeStartAmbientStream(const AudioUtil::AudioSample* samples, size_t nSamples)
+{
+  static const char* kAmbient = "/run/vic-cloud/xiaozhi-ambient";
+  if (access(kAmbient, F_OK) != 0) {
+    _ambientHotFrames = 0;
+    return;
+  }
+
+  struct stat st;
+  if (stat(kAmbient, &st) == 0 && st.st_mtime > 0) {
+    const time_t age = time(nullptr) - st.st_mtime;
+    if (age > 180) {
+      unlink(kAmbient);
+      _ambientHotFrames = 0;
+      LOG_INFO("MicDataProcessor.AmbientExpired",
+               "Walking mic closed after %ld s quiet — Hey Vector to talk again",
+               static_cast<long>(age));
+      return;
+    }
+  }
+
+  // Official listen, TTS, or a stream already in flight owns the mic.
+  if (_micDataSystem->IsOfficialListen() ||
+      _micDataSystem->HasStreamingJob() ||
+      _micDataSystem->IsMicMuted() ||
+      _isSpeakerActive ||
+      access("/run/vic-cloud/xiaozhi-busy", F_OK) == 0 ||
+      access("/run/xiaozhi-busy", F_OK) == 0 ||
+      access("/run/vic-cloud/xiaozhi-relisten", F_OK) == 0 ||
+      access("/run/xiaozhi-relisten", F_OK) == 0) {
+    _ambientHotFrames = 0;
+    return;
+  }
+  if (samples == nullptr || nSamples == 0) {
+    return;
+  }
+
+  double sum = 0.0;
+  for (size_t i = 0; i < nSamples; ++i) {
+    const double s = static_cast<double>(samples[i]);
+    sum += s * s;
+  }
+  const double rms = std::sqrt(sum / static_cast<double>(nSamples));
+  // Standing VAD treats ~200 RMS as voice. Wheel noise while walking is louder,
+  // so this floor is about 12 dB hotter and must hold for 200 ms.
+  constexpr double kAmbientSpeechRMS = 800.0;
+  constexpr int kNeedFrames = 20;
+  if (rms >= kAmbientSpeechRMS) {
+    if (++_ambientHotFrames >= kNeedFrames) {
+      _ambientHotFrames = 0;
+      LOG_INFO("MicDataProcessor.AmbientSpeech",
+               "rms %.0f — streaming to Xiaozhi without the standing listen", rms);
+      _micDataSystem->MarkAmbientStream();
+      // 400 ms pre-roll so the start of the word is not cut off. The immediate
+      // buffer holds 750 ms, so this stays inside it.
+      CreateStreamJob(CloudMic::StreamType::Normal, 400);
+    }
+  } else if (_ambientHotFrames > 0) {
+    --_ambientHotFrames;
+  }
+}
+
 void MicDataProcessor::ProcessTriggerLoop()
 {
   Anki::Util::SetThreadName(pthread_self(), "MicProcTrigger");
@@ -784,6 +901,8 @@ void MicDataProcessor::ProcessTriggerLoop()
                                       (unsigned int)processedAudio.size(),
                                       (_micImmediateDirection->GetLatestSample().activeState != 0));
     }
+
+    MaybeStartAmbientStream(processedAudio.data(), processedAudio.size());
 
     // Now we're done using this audio with the recognizer, so let it go
     {

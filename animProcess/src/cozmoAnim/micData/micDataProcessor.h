@@ -94,6 +94,9 @@ public:
 
   void VoiceTriggerWordDetection(const AudioUtil::SpeechRecognizerCallbackInfo& info);
 
+  // Ting + cyan + cloud stream. Does not notify the engine, so Vector keeps walking.
+  void StartOpenMic();
+
   void FakeTriggerWordDetection(bool fromMute = false);
 
   void GetLatestMicDirectionData(MicDirectionData& out_lastSample, DirectionIndex& out_dominantDirection) const;
@@ -117,6 +120,8 @@ private:
   std::unique_ptr<SVadConfig_t> _sVadConfig;
   std::unique_ptr<SVadObject_t> _sVadObject;
   uint32_t _vadCountdown = 0;
+  // Consecutive 10ms frames above the walking-speech floor.
+  int _ambientHotFrames = 0;
   std::unique_ptr<MicImmediateDirection> _micImmediateDirection;
 
   static constexpr uint32_t kRawAudioBufferSize = kRawAudioPerBuffer_ms / kTimePerChunk_ms;
@@ -195,6 +200,8 @@ private:
 
   void ProcessRawLoop();
   void ProcessTriggerLoop();
+  // Walking hold: open a cloud stream on loud speech, without the listen behavior.
+  void MaybeStartAmbientStream(const AudioUtil::AudioSample* samples, size_t nSamples);
   
   void UpdateBeatDetector(const AudioUtil::AudioSample* const samples, const uint32_t nSamples);
   

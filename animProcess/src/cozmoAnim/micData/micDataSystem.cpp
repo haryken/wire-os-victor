@@ -420,6 +420,51 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
     }
   }
 
+  // Open mode, next turn: ting + mic, no FakeTrigger (that stands the robot still).
+  {
+    if (access(kXiaozhiOpenMicArmPath, F_OK) == 0) {
+      const bool busy = access("/run/vic-cloud/xiaozhi-busy", F_OK) == 0 ||
+                        access("/run/xiaozhi-busy", F_OK) == 0;
+      if (!normalFace) {
+        static uint32_t sOpenFaceLog = 0;
+        if ((++sOpenFaceLog % 60) == 1) {
+          LOG_INFO("MicDataSystem.Update.OpenMicFaceDeferred",
+                   "Waiting for the normal face before the ting");
+        }
+      } else if (busy) {
+        static uint32_t sOpenBusyLog = 0;
+        if ((++sOpenBusyLog % 60) == 1) {
+          LOG_INFO("MicDataSystem.Update.OpenMicBusyDeferred",
+                   "Waiting until TTS finishes before the ting");
+        }
+      } else if (HasStreamingJob() || IsMicMuted()) {
+        unlink(kXiaozhiOpenMicArmPath);
+      } else {
+        unlink(kXiaozhiOpenMicArmPath);
+        LOG_INFO("MicDataSystem.Update.OpenMic",
+                 "New turn — ting and open mic, robot keeps walking");
+        _micDataProcessor->StartOpenMic();
+      }
+    }
+  }
+
+  // Ambient hold: cyan backpack while nobody is streaming, without the listen
+  // behavior. Speech itself is opened from the mic thread (see MaybeStartAmbientStream).
+  {
+    static const char* kAmbient = "/run/vic-cloud/xiaozhi-ambient";
+    const bool ambient = access(kAmbient, F_OK) == 0;
+    const bool streaming = IsCloudStreaming();
+    const bool wantHoldLight = ambient && !streaming && !IsOfficialListen();
+    if (wantHoldLight != _ambientLightHeld) {
+      _ambientLightHeld = wantHoldLight;
+      SetWillStream(wantHoldLight);
+      if (wantHoldLight) {
+        LOG_INFO("MicDataSystem.Update.AmbientHold",
+                 "Backpack cyan; mic waits for speech while Vector walks");
+      }
+    }
+  }
+
   _fftResultData->_fftResultMutex.lock();
   while (_fftResultData->_fftResultList.size() > 0)
   {
@@ -578,6 +623,7 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
         _xiaozhiVadStream = (_currentStreamingJob != nullptr) &&
                             (_currentStreamingJob->_type == CloudMic::StreamType::Normal) &&
                             (access(kXiaozhiListenVadFlagPath, F_OK) == 0);
+        const bool openMic = _openMicStream.load();
 
         // even though this isn't necessarily the exact frame the backpack lights begin (since that's done in a different
         // thread), it doesn't make a noticeable difference since this is an arbitrary number and doesn't need to be precise
@@ -595,7 +641,8 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
                       "Hotword sent but streaming is SIMULATED (no Audio) — Xiaozhi STT will fail");
         } else {
           LOG_INFO("MicDataSystem.Update.StreamingStart", "Real mic stream to cloud (%s)",
-                   _xiaozhiVadStream ? "xiaozhi vad, until stopSignal" : "fixed window");
+                   openMic ? "open mic, until speech is sent" :
+                   (_xiaozhiVadStream ? "xiaozhi vad, until stopSignal" : "fixed window"));
         }
       }
       else
@@ -618,13 +665,17 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
         static constexpr size_t kMaxRecordNumChunks = (kStreamingTimeout_ms / kTimePerChunk_ms) + 1;
         static constexpr size_t kXiaozhiVadMaxRecordNumChunks = (kXiaozhiVadStreamingTimeout_ms / kTimePerChunk_ms) + 1;
         const size_t maxRecordNumChunks = _xiaozhiVadStream ? kXiaozhiVadMaxRecordNumChunks : kMaxRecordNumChunks;
-        const bool didTimeout = _streamingChunksSent >= maxRecordNumChunks;
-        if (receivedStopMessage || didTimeout)
+        // Open mic has no 6s/30s cap. It ends when vic-cloud heard the utterance
+        // (stopSignal) or the user left this conversation mode.
+        const bool openMic = _openMicStream.load();
+        const bool openModeOff = openMic && (access(kXiaozhiOpenMicModePath, F_OK) != 0);
+        const bool didTimeout = !openMic && (_streamingChunksSent >= maxRecordNumChunks);
+        if (receivedStopMessage || didTimeout || openModeOff)
         {
           _streamingComplete = true;
           realStreamHasFinished = true;
 
-          if (didTimeout)
+          if (didTimeout || openModeOff)
           {
             SendUdpMessage(CloudMic::Message::CreateaudioDone({}));
           }
@@ -840,8 +891,44 @@ void MicDataSystem::SetWillStream(bool willStream) const
   }
 }
 
+void MicDataSystem::MarkAmbientStream()
+{
+  _ambientOwned.store(true);
+}
+
+void MicDataSystem::MarkOpenMicStream()
+{
+  _openMicStream.store(true);
+}
+
+bool MicDataSystem::ReleaseAmbientStreamForWake()
+{
+  if (!IsCloudStreaming()) {
+    return true;
+  }
+  if (!_ambientOwned.load()) {
+    return false;
+  }
+  _ambientOwned.store(false);
+  // Drop the job on this thread. The next Hotword (standing listen) replaces
+  // vic-cloud's open stream; don't touch the UDP socket from the mic thread.
+  ClearCurrentStreamingJob();
+  LOG_INFO("MicDataSystem.AmbientReleasedForWake",
+           "Hey Vector takes over from the walking mic");
+  return true;
+}
+
+bool MicDataSystem::IsCloudStreaming() const
+{
+  std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
+  return _currentlyStreaming || (_currentStreamingJob != nullptr);
+}
+
 void MicDataSystem::ClearCurrentStreamingJob()
 {
+  _ambientOwned.store(false);
+  _officialListen.store(false);
+  _openMicStream.store(false);
   {
     std::lock_guard<std::recursive_mutex> lock(_dataRecordJobMutex);
     _currentlyStreaming = false;

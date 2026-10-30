@@ -38,6 +38,9 @@ namespace MicData {
   // WireOS: vic-cloud creates this file while Xiaozhi listen_mode is "vad". The mic then
   // stays open until vic-cloud sends stopSignal (server STT), capped at this timeout.
   static constexpr const char* kXiaozhiListenVadFlagPath    = "/run/vic-cloud/xiaozhi-listen-vad";
+  // conversation_mode "open": ting + cyan backpack, mic stays up, robot keeps walking.
+  static constexpr const char* kXiaozhiOpenMicModePath      = "/run/vic-cloud/xiaozhi-openmic-mode";
+  static constexpr const char* kXiaozhiOpenMicArmPath       = "/run/vic-cloud/xiaozhi-openmic";
   static constexpr uint32_t kXiaozhiVadStreamingTimeout_ms  = 30000 + kTriggerOverlapSize_ms;
   static constexpr uint32_t kStreamingDefaultMinDuration_ms = 4000;
   static constexpr uint32_t kRawAudioPerBuffer_ms           = 1000;

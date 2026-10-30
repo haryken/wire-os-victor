@@ -27,6 +27,7 @@
 #include "clad/robotInterface/messageRobotToEngine.h"
 #include "clad/types/beatDetectorTypes.h"
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -154,6 +155,18 @@ public:
   // trigger word and are either about to start streaming, or not (either on purpose, or it was cancelled/error)
   void SetWillStream(bool willStream) const;
 
+  // WireOS ambient hold. Official Hey Vector still enters ReactToVoiceCommand
+  // once; this path only opens the cloud mic so Vector can keep walking.
+  void SetOfficialListen(bool on) { _officialListen.store(on); }
+  bool IsOfficialListen() const { return _officialListen.load(); }
+  void MarkAmbientStream();
+  // Next cloud stream stays open until vic-cloud sends stopSignal (utterance sent).
+  void MarkOpenMicStream();
+  // Stops an ambient cloud stream so a real wake can run. Returns false when
+  // a non-ambient stream is already open (that wake is ignored).
+  bool ReleaseAmbientStreamForWake();
+  bool IsCloudStreaming() const;
+
 
 private:
 
@@ -176,6 +189,7 @@ private:
   size_t _streamingAudioIndex = 0;   // index into current MicDataInfo buffer (0 after A1 trim)
   size_t _streamingChunksSent = 0;   // cumulative chunks sent this stream (timeout / duration)
   bool _xiaozhiVadStream = false;    // latched at stream start from kXiaozhiListenVadFlagPath
+  std::atomic<bool> _openMicStream{false};
   BaseStationTime_t _lastMicJobProbe_ns = 0; // WireOS TEMP: MicJobProbe interval
   Util::Locale _locale = {"en", "US"};
   std::string _timeZone = "";
@@ -212,6 +226,11 @@ private:
   AlexaSimpleState _alexaState;
   
   std::atomic<bool> _micMuted;
+  // Ambient cloud stream (no engine listen behavior). Wake must be allowed to
+  // steal it; a normal Hey Vector stream must not.
+  std::atomic<bool> _ambientOwned{false};
+  std::atomic<bool> _officialListen{false};
+  bool _ambientLightHeld = false;
 
   // if hey vector is spoken, we'll need to abort the alexa pairing screen if it's active. The overly verbose
   // name is becuase we hardcode the "reason" that we are leaving the pairing screen based on the assumption
