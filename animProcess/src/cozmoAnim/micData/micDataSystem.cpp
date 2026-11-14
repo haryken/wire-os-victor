@@ -437,9 +437,11 @@ void MicDataSystem::Update(BaseStationTime_t currTime_nanosec)
           LOG_INFO("MicDataSystem.Update.OpenMicBusyDeferred",
                    "Waiting until TTS finishes before the ting");
         }
-      } else if (HasStreamingJob() || IsMicMuted()) {
+      } else if (IsMicMuted()) {
         unlink(kXiaozhiOpenMicArmPath);
       } else {
+        // noaudio often leaves a leftover stream; StartOpenMic clears it and
+        // reopens. Do not silently drop the arm — that skipped the ting/Hotword.
         unlink(kXiaozhiOpenMicArmPath);
         LOG_INFO("MicDataSystem.Update.OpenMic",
                  "New turn — ting and open mic, robot keeps walking");

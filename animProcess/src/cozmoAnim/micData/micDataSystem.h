@@ -165,6 +165,9 @@ public:
   // Stops an ambient cloud stream so a real wake can run. Returns false when
   // a non-ambient stream is already open (that wake is ignored).
   bool ReleaseAmbientStreamForWake();
+  // Drop leftover open-mic / noaudio-held stream so the next StartOpenMic can
+  // CreateStreamJob and emit a fresh Hotword (else cyan stays with no ListenStart).
+  void ClearStreamingJobForRelisten() { ClearCurrentStreamingJob(); }
   bool IsCloudStreaming() const;
 
 

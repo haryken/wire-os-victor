@@ -232,25 +232,44 @@ void MicDataProcessor::StartOpenMic()
   if (_micDataSystem->IsMicMuted()) {
     return;
   }
-  if (_micDataSystem->HasStreamingJob()) {
-    return;
-  }
   static std::atomic<bool> sPending{false};
   if (sPending.exchange(true)) {
     return;
   }
 
+  // After detect/TTS, Xiaozhi often keeps the Vector stream (noaudio). A second
+  // ArmOpenMic used to bail on HasStreamingJob → ting/cyan with no new Hotword,
+  // so the backpack blinked forever and cloud never ListenStart'd.
+  if (_micDataSystem->HasStreamingJob()) {
+    LOG_INFO("MicDataProcessor.OpenMic", "Replacing leftover stream before reopen");
+    _micDataSystem->ClearStreamingJobForRelisten();
+  }
+
+  // Same stream arm as continuous FakeTrigger (official listen + CreateStreamJob).
+  // Only the earcon/get-in differs: WithoutGetIn (ting, keep walking) and no
+  // TriggerWordDetected to engine (that would freeze in BehaviorReactToVoiceCommand).
   _micDataSystem->SetWillStream(true);
-  auto openJob = [this](bool) {
+  _micDataSystem->SetOfficialListen(true);
+  auto openJob = [this](bool success) {
     sPending.store(false);
-    if (_micDataSystem->HasStreamingJob()) {
+    if (!success) {
+      _micDataSystem->SetWillStream(false);
+      _micDataSystem->SetOfficialListen(false);
+      LOG_WARNING("MicDataProcessor.OpenMic", "Ting response failed — mic not opened");
       return;
     }
+    if (_micDataSystem->HasStreamingJob()) {
+      LOG_INFO("MicDataProcessor.OpenMic", "Replacing stream that appeared during ting");
+      _micDataSystem->ClearStreamingJobForRelisten();
+    }
     _micDataSystem->MarkOpenMicStream();
-    // 400 ms pre-roll keeps the start of the word. The immediate buffer holds 750 ms.
+    // Same CreateStreamJob path as continuous FakeTrigger (Processed SE audio).
+    // Continuous uses kTriggerOverlapSize_ms (50) because the trigger-word buffer
+    // already holds speech; after ting there is no prior speech in that buffer,
+    // so keep 400ms pre-roll or the first syllables are cut (STT "vấp").
     CreateStreamJob(CloudMic::StreamType::Normal, 400);
     LOG_INFO("MicDataProcessor.OpenMic",
-             "Mic open after ting — no standing listen, robot keeps walking");
+             "Mic open after ting — same CreateStreamJob as continuous, 400ms pre-roll, no standing listen");
   };
 
   ShowAudioStreamStateManager* show = _context->GetShowAudioStreamStateManager();
@@ -269,6 +288,13 @@ void MicDataProcessor::TriggerWordDetectCallback(TriggerWordDetectSource source,
   // Open mode: chime and cyan only. triggerWordDetected would freeze Vector
   // in BehaviorReactToVoiceCommand.
   if (access(kXiaozhiOpenMicModePath, F_OK) == 0) {
+    // Already uplinking: ignore Hey Vector / false wake. Calling StartOpenMic
+    // here re-tings, clears the stream, and cuts the utterance mid-speech
+    // (cloud then sees partial STT like "bài hát").
+    if (_micDataSystem->HasStreamingJob()) {
+      LOG_INFO("MicDataProcessor.OpenMic", "Ignore wake — mic already open");
+      return;
+    }
     StartOpenMic();
     return;
   }
