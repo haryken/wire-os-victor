@@ -27,6 +27,9 @@
 #include "clad/robotInterface/messageRobotToEngine.h"
 #include "util/logging/logging.h"
 
+#include <cstdlib>
+#include <string>
+
 
 namespace Anki {
 namespace Vector {  
@@ -57,6 +60,8 @@ void EngineRobotAudioClient::SetRobotMasterVolume( external_interface::Volume vo
 {
   using AudioVolumeState = AudioMetaData::GameState::Robot_Vic_Volume;
   auto audioState = AudioVolumeState::Invalid;
+  // Stock: volume levels are entirely Wwise GameState on Character buses.
+  // Extra RTPCs fought those states so Low/Med/High stopped sounding different.
   switch (volume) {
     case external_interface::Volume::MUTE:
       audioState = AudioVolumeState::Mute;
@@ -81,6 +86,12 @@ void EngineRobotAudioClient::SetRobotMasterVolume( external_interface::Volume vo
   }
   PostGameState( AudioMetaData::GameState::StateGroupType::Robot_Vic_Volume,
                  static_cast<AudioMetaData::GameState::GenericState>(audioState) );
+  // Cut in-flight SFX when muting; power-off also locks AUDIO_TRACK when MUTE.
+  if ( volume == external_interface::Volume::MUTE ) {
+    StopAllEvents();
+  }
+  // Keep Wwise MultiMedia1 up after earlier mute experiments (best-effort).
+  (void)std::system( "sudo -n /anki/bin/wireos-speaker-gain 84 >/dev/null 2>&1 &" );
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

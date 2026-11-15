@@ -15,11 +15,14 @@
 
 #include "cannedAnimLib/cannedAnims/cannedAnimationContainer.h"
 #include "clad/robotInterface/messageRobotToEngine.h"
+#include "clad/types/animationTypes.h"
 #include "engine/actions/animActions.h"
 #include "engine/aiComponent/behaviorComponent/behaviorExternalInterface/beiRobotInfo.h"
 #include "engine/aiComponent/beiConditions/conditions/conditionTimePowerButtonPressed.h"
 #include "engine/components/dataAccessorComponent.h"
+#include "engine/components/settingsManager.h"
 #include "engine/externalInterface/externalInterface.h"
+#include "proto/external_interface/settings.pb.h"
 
 namespace Anki {
 namespace Vector {
@@ -223,7 +226,17 @@ void BehaviorPoweringRobotOff::StartAnimation(const std::string& animName, const
   _dVars.lastAnimPlayedName = animName;
   const u32 numLoops = 1;
   const bool interruptRunning = true;
-  const u8 tracksToLock = (u8)AnimTrackFlag::NO_TRACKS;
+  // Stock Mute silences power-off SFX via Wwise GameState. On WireOS that
+  // path has been leaky — lock the audio track when master_volume is MUTE so
+  // power on/off anims stay silent like stock.
+  u8 tracksToLock = (u8)AnimTrackFlag::NO_TRACKS;
+  {
+    const auto& settings = GetBEI().GetSettingsManager();
+    const uint32_t vol = settings.GetRobotSettingAsUInt(external_interface::RobotSetting::master_volume);
+    if ( vol == static_cast<uint32_t>(external_interface::Volume::MUTE) ) {
+      tracksToLock = (u8)AnimTrackFlag::AUDIO_TRACK;
+    }
+  }
   const float timeout_sec = PlayAnimationAction::GetDefaultTimeoutInSeconds();
   
   auto callback = [this](const AnimationComponent::AnimResult res, u32 streamTimeAnimEnded) {

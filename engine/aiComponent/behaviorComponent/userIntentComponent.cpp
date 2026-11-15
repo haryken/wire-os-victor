@@ -42,6 +42,7 @@
 
 #include "util/console/consoleInterface.h"
 #include "util/console/consoleFunction.h"
+#include "util/fileUtils/fileUtils.h"
 #include "util/logging/DAS.h"
 #include "webServerProcess/src/webVizSender.h"
 
@@ -242,6 +243,37 @@ UserIntentPtr UserIntentComponent::ActivateUserIntent(UserIntentTag userIntent, 
   return _activeIntent;
 }
 
+namespace {
+// vic-cloud arms this before delivering an AI self-control intent. When the
+// behavior finishes we raise intent-done so cloud can send detect "xong hành
+// động" and reopen the mic. UI actions (eye color, etc.) never arm pending.
+constexpr const char* kAISelfControlPendingPath = "/run/vic-cloud/ai-self-control-pending";
+constexpr const char* kIntentDonePath           = "/run/vic-cloud/intent-done";
+
+void SignalAISelfControlDoneIfArmed(UserIntentTag userIntent)
+{
+  if (userIntent == UserIntentTag::INVALID) {
+    return;
+  }
+  if (!Util::FileUtils::FileExists(kAISelfControlPendingPath)) {
+    return;
+  }
+  const char* tagStr = UserIntentTagToString(userIntent);
+  const std::string body = (tagStr != nullptr) ? tagStr : "done";
+  if (!Util::FileUtils::WriteFile(kIntentDonePath, body, false)) {
+    LOG_WARNING("UserIntentComponent.AISelfControlDone.WriteFailed",
+                "Could not write %s for intent '%s'",
+                kIntentDonePath,
+                body.c_str());
+  } else {
+    LOG_INFO("UserIntentComponent.AISelfControlDone",
+             "Signaled intent-done for '%s'",
+             body.c_str());
+  }
+  Util::FileUtils::DeleteFile(kAISelfControlPendingPath);
+}
+} // namespace
+
 void UserIntentComponent::DeactivateUserIntent(UserIntentTag userIntent)
 {
   // we can have nested activate calls, and we want to be able to deactivate "older" activated intents
@@ -264,6 +296,8 @@ void UserIntentComponent::DeactivateUserIntent(UserIntentTag userIntent)
             _activeIntentOwner.c_str());
   _activeIntent.reset();
   _activeIntentOwner.clear();
+
+  SignalAISelfControlDoneIfArmed(userIntent);
 
   if (_robot) // No robot pointer in 'test_engine', so must check here at runtime
   {
